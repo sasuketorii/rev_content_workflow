@@ -55,6 +55,9 @@ if (failures.length) {
 process.stdout.write(JSON.stringify({ head: head ?? null, files: manifest.releaseAllowlist.length }));
 NODE
 node "$ROOT/scripts/verify-tree.mjs" "$STAGE"
+SBOM_CHECK=$(mktemp -d)/rev-content-workflow.cdx.json
+node "$ROOT/scripts/generate-sbom.mjs" "$SBOM_CHECK" >/dev/null
+node "$ROOT/scripts/validate-sbom.mjs" "$SBOM_CHECK"
 
 if [ "${REV_CONTENT_VERIFY_LOCAL_PATCHES:-0}" = 1 ]; then
   patch_stage=$(mktemp -d)

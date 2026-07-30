@@ -18,11 +18,16 @@
     "test:distribution": "npm run build && node --test dist/test/distribution.test.js",
     "release:verify": "sh scripts/verify-distribution.sh",
     "release:archive": "sh scripts/build-release.sh",
-    "sbom": "node scripts/generate-sbom.mjs"
+    "sbom": "node scripts/generate-sbom.mjs",
+    "sbom:validate": "node scripts/validate-sbom.mjs"
   },
   "devDependencies": {
+    "@cyclonedx/cyclonedx-library": "10.1.0",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.1.1",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "ajv-formats-draft2019": "1.6.1",
     "eslint": "^10.8.0",
     "typescript": "^6.0.2",
     "typescript-eslint": "^8.65.0"

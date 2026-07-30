@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { npmIntegrityToCycloneDx, sha256HexToCycloneDx } from "./sbom-hash.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const workflowLock = JSON.parse(await readFile(join(root, "package-lock.json"), "utf8"));
@@ -25,7 +26,9 @@ function addNpm(lock, scope) {
       name,
       version: value.version,
       licenses: value.license ? [{ license: { id: value.license } }] : undefined,
-      hashes: value.integrity ? [{ alg: "SHA-512", content: value.integrity }] : undefined
+      hashes: value.integrity !== undefined
+        ? [npmIntegrityToCycloneDx(value.integrity, `${scope}:${name}@${value.version}`)]
+        : undefined
     });
   }
 }
@@ -39,7 +42,7 @@ for (const block of cargoLock.split("\n[[package]]\n").slice(1)) {
   if (name && version) {
     components.push({
       type: "library", group: "revmagic-isolated", name, version,
-      hashes: checksum ? [{ alg: "SHA-256", content: checksum }] : undefined
+      hashes: checksum ? [sha256HexToCycloneDx(checksum, `cargo:${name}@${version}`)] : undefined
     });
   }
 }
@@ -59,7 +62,7 @@ if (releaseRoot) {
         file.path === "deps/notebooklm/dist/index.js") {
       components.push({
         type: "file", name: file.path, version: upstream.generatedFor,
-        hashes: [{ alg: "SHA-256", content: file.sha256 }]
+        hashes: [sha256HexToCycloneDx(file.sha256, `release:${file.path}`)]
       });
     }
   }
@@ -76,7 +79,8 @@ const sbom = {
       { name: "rev-content:revmagic-isolated-lock-sha256", value: await sha(cargoLockPath) }
     ]
   },
-  components
+  components: [...new Map(components.map((component) =>
+    [JSON.stringify(component), component])).values()]
 };
 const output = process.argv[2] ?? "release/rev-content-workflow.cdx.json";
 await mkdir(dirname(output), { recursive: true });

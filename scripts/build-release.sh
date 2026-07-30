@@ -35,6 +35,7 @@ NODE
 node "$ROOT/scripts/verify-tree.mjs" "$STAGE"
 cp "$STAGE/source-manifest.json" "$OUT/source-manifest.json"
 node "$ROOT/scripts/generate-sbom.mjs" "$OUT/rev-content-workflow.cdx.json"
+node "$ROOT/scripts/validate-sbom.mjs" "$OUT/rev-content-workflow.cdx.json"
 
 find "$STAGE" -type f -exec touch -t 197001010000 {} +
 LIST=$(mktemp)
