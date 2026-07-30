@@ -17,14 +17,13 @@
       "licenseSha256": "0ad77d6e05eea79c29fbadce21fb7ed7aad883acde73f4a2c5fef77c9536cd07"
     },
     "revmagic": {
-      "repository": "https://github.com/sasuketorii/revmagic.git",
-      "commit": "7fb1cd0d0992abc676656de0b1a170c888c109e9",
-      "patch": "patches/revmagic-optimize.patch",
-      "patchSha256": "7a0a501d81cd69de96a64524d965b72d361b11a8da4a08a906795b2aa8d7d086",
+      "repository": "https://github.com/sasuketorii/revmagic-runtime.git",
+      "commit": "4f4bbcf565e2fb0da968971eb9f485a74bf3cac2",
+      "sourceContract": "patchless public root workspace with exactly revmagic-core, revmagic-cli, and revmagic-mcp",
       "lockfile": "Cargo.lock",
-      "baseLockfileSha256": "a2290a8d9f1678123cdc2cc571ecbd6f1e69b075eddb59d780cb57bd03afe0c9",
-      "isolatedLockfile": "locks/revmagic-isolated.Cargo.lock",
-      "isolatedLockfileSha256": "7c5e1d6a50c3027f99564f312c517c69def20d120d9bee3aee67c2929457a727",
+      "lockfileSha256": "e03b200f5991fc97c3146d0e5e710d061f31c136d58a837ff95fa01c5d79b5da",
+      "verifiedLockfile": "locks/revmagic-isolated.Cargo.lock",
+      "verifiedLockfileSha256": "e03b200f5991fc97c3146d0e5e710d061f31c136d58a837ff95fa01c5d79b5da",
       "toolSchema": {
         "tools": [
           "url_to_mp3",
@@ -33,7 +32,9 @@
         "source": "crates/revmagic-mcp/src/tools.rs"
       },
       "license": "MIT",
-      "licenseSource": "patches/revmagic-optimize.patch"
+      "licenseSource": "LICENSE",
+      "licenseFile": "LICENSES/RevMagic.txt",
+      "licenseSha256": "f5e10e376c4fab85036c3b25e4609a9c70e736ddd88c3f4a88d8b55e21fd7acb"
     }
   }
 }

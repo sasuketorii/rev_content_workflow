@@ -8,7 +8,7 @@ Rev Contentは、メディアURLを再開可能なNotebookLM文字起こしジ�
 
 - arm64/x86_64のmacOSまたはLinux
 - Node.js 22.13以上、npm、Git
-- Rust/Cargo
+- Rust/Cargo 1.86.0以上
 - FFmpeg、yt-dlp
 - Codex CLIまたはClaude Code CLI
 
@@ -69,8 +69,10 @@ macOSのlaunchdは導入・再開しません。Linuxのsystemd user templateは
 
 ## 検証と由来
 
-`upstream.lock.json`にURL、full commit pin、lock/patch SHA-256、tool schema、
-licenseを記録しています。`distribution-manifest.json`がrelease allowlistです。
+`upstream.lock.json`にsource URL、full commit pin、lock SHA-256、適用対象だけの
+patch contract、tool schema、licenseを記録しています。RevMagicは公開
+`revmagic-runtime`のroot workspaceをpatchなしで検証・buildします。
+`distribution-manifest.json`がrelease allowlistです。
 releaseはsource manifest、CycloneDX SBOM、basenameだけを記録したchecksumを生成し、
 archive展開後に全fileを再検査します。git `HEAD`が存在する場合はallowlistの全byteが
 HEADと一致しなければ生成しません。
@@ -83,7 +85,8 @@ npm run sbom -- release/rev-content-workflow.cdx.json
 npm run release:archive
 ```
 
-source releaseと同梱変更はMITです。`LICENSE`と`LICENSES/`を参照してください。
+workflow、NotebookLM変更、無変更の公開RevMagic runtimeはMITです。
+`LICENSE`と`LICENSES/`を参照してください。
 
 Ubuntu外部gateは`.github/workflows/linux-external-gate.yml`です。Linux release前に
 clean fixture setup、restart永続性、systemd lifecycle contractを必須確認します。

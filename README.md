@@ -11,14 +11,17 @@ SQLite database.
 
 - macOS or Linux on arm64 or x86_64
 - Node.js 22.13 or newer, npm, Git
-- Rust/Cargo
+- Rust/Cargo 1.86.0 or newer
 - FFmpeg and yt-dlp
 - gitleaks for release verification
 - Codex CLI and/or Claude Code CLI
 
-The installer builds from exact source commits with checked patches. It does
-not distribute this repository's `node_modules`, `dist`, local runtime files,
-PDFs, credentials, browser profile, audio, or transcripts.
+The installer builds from exact source commits. Dependencies that declare a
+patch contract are checked before patching. RevMagic is built without a patch
+from the pinned public `revmagic-runtime` root workspace after its Cargo lock
+and license match the packaged copies. The release does not contain this
+repository's `node_modules`, `dist`, local runtime files, PDFs, credentials,
+browser profile, audio, or transcripts.
 
 ## Install
 
@@ -96,8 +99,10 @@ stops `rev-content.timer` before deleting receipt-owned units.
 
 ## Provenance and releases
 
-[`upstream.lock.json`](upstream.lock.json) records upstream/fork URLs, full
-commit pins, lockfile hashes, patch hashes, tool schema sources, and licenses.
+[`upstream.lock.json`](upstream.lock.json) records source URLs, full commit
+pins, lockfile hashes, applicable patch contracts, tool schema sources, and
+licenses. RevMagic's contract is explicitly patchless and points to its public
+runtime repository.
 [`distribution-manifest.json`](distribution-manifest.json) is the release
 allowlist and data policy.
 
@@ -114,16 +119,16 @@ npm run sbom -- release/rev-content-workflow.cdx.json
 npm run release:archive
 ```
 
-For the full local `file://` patch/build contract:
+For the full local `file://` source/build contract:
 
 ```sh
 REV_CONTENT_TEST_NOTEBOOK_REPO=/path/to/notebook-fork \
-REV_CONTENT_TEST_REVMAGIC_REPO=/path/to/revmagic \
+REV_CONTENT_TEST_REVMAGIC_REPO=/path/to/revmagic-runtime \
 ./scripts/test-fixture-install.sh
 ```
 
-The source release and bundled modifications are MIT licensed. See `LICENSE`
-and `LICENSES/`.
+The workflow, NotebookLM modifications, and unmodified public RevMagic runtime
+are MIT licensed. See `LICENSE` and `LICENSES/`.
 
 The Ubuntu external gate is `.github/workflows/linux-external-gate.yml`. It is
 required before a Linux release and covers clean fixture setup, restart

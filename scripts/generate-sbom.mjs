@@ -41,7 +41,7 @@ for (const block of cargoLock.split("\n[[package]]\n").slice(1)) {
   const checksum = block.match(/^checksum = "([^"]+)"/m)?.[1];
   if (name && version) {
     components.push({
-      type: "library", group: "revmagic-isolated", name, version,
+      type: "library", group: "revmagic-runtime", name, version,
       hashes: checksum ? [sha256HexToCycloneDx(checksum, `cargo:${name}@${version}`)] : undefined
     });
   }
@@ -76,7 +76,7 @@ const sbom = {
     component: { type: "application", name: workflowLock.name, version: workflowLock.version },
     properties: [
       { name: "rev-content:notebooklm-patched-lock-sha256", value: await sha(notebookLockPath) },
-      { name: "rev-content:revmagic-isolated-lock-sha256", value: await sha(cargoLockPath) }
+      { name: "rev-content:revmagic-runtime-lock-sha256", value: await sha(cargoLockPath) }
     ]
   },
   components: [...new Map(components.map((component) =>

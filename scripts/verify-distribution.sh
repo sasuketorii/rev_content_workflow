@@ -23,13 +23,21 @@ for (const path of manifest.releaseAllowlist) {
   }
 }
 for (const dependency of Object.values(lock.dependencies)) {
-  if (sha(dependency.patch) !== dependency.patchSha256) failures.push(`patch checksum mismatch: ${dependency.patch}`);
+  if (dependency.patch !== undefined || dependency.patchSha256 !== undefined) {
+    if (typeof dependency.patch !== "string" || typeof dependency.patchSha256 !== "string") {
+      failures.push(`incomplete patch contract: ${dependency.repository}`);
+    } else if (sha(dependency.patch) !== dependency.patchSha256) {
+      failures.push(`patch checksum mismatch: ${dependency.patch}`);
+    }
+  }
 }
 if (sha(lock.dependencies.notebooklm.lockfile === "package-lock.json"
   ? "locks/notebooklm-patched.package-lock.json" : lock.dependencies.notebooklm.lockfile) !==
     lock.dependencies.notebooklm.patchedLockfileSha256) failures.push("patched NotebookLM lock mismatch");
-if (sha(lock.dependencies.revmagic.isolatedLockfile) !==
-    lock.dependencies.revmagic.isolatedLockfileSha256) failures.push("isolated Cargo lock mismatch");
+if (sha(lock.dependencies.revmagic.verifiedLockfile) !==
+    lock.dependencies.revmagic.verifiedLockfileSha256) failures.push("verified RevMagic Cargo lock mismatch");
+if (sha(lock.dependencies.revmagic.licenseFile) !==
+    lock.dependencies.revmagic.licenseSha256) failures.push("verified RevMagic license mismatch");
 if (manifest.licenseGate?.status !== "PASS") failures.push("license gate is not PASS");
 let head;
 try {
@@ -64,7 +72,11 @@ if [ "${REV_CONTENT_VERIFY_LOCAL_PATCHES:-0}" = 1 ]; then
   git clone --quiet --no-checkout "${REV_CONTENT_NOTEBOOK_REPO:-https://github.com/sasuketorii/notebooklm_mcp_with.git}" "$patch_stage/notebook"
   git -C "$patch_stage/notebook" checkout --quiet --detach 798513bc08510f257c936d1ddbdd1b935d0c0a0a
   git -C "$patch_stage/notebook" apply --check "$ROOT/patches/notebooklm-audio-custom.patch"
-  git clone --quiet --no-checkout "${REV_CONTENT_REVMAGIC_REPO:-https://github.com/sasuketorii/revmagic.git}" "$patch_stage/revmagic"
-  git -C "$patch_stage/revmagic" checkout --quiet --detach 7fb1cd0d0992abc676656de0b1a170c888c109e9
-  git -C "$patch_stage/revmagic" apply --check "$ROOT/patches/revmagic-optimize.patch"
+  git clone --quiet --no-checkout "${REV_CONTENT_REVMAGIC_REPO:-https://github.com/sasuketorii/revmagic-runtime.git}" "$patch_stage/revmagic"
+  git -C "$patch_stage/revmagic" checkout --quiet --detach 4f4bbcf565e2fb0da968971eb9f485a74bf3cac2
+  test "$(git -C "$patch_stage/revmagic" rev-parse HEAD)" = 4f4bbcf565e2fb0da968971eb9f485a74bf3cac2
+  cmp "$ROOT/locks/revmagic-isolated.Cargo.lock" "$patch_stage/revmagic/Cargo.lock"
+  cmp "$ROOT/LICENSES/RevMagic.txt" "$patch_stage/revmagic/LICENSE"
+  cargo metadata --locked --no-deps --format-version 1 --manifest-path "$patch_stage/revmagic/Cargo.toml" |
+    node "$ROOT/scripts/verify-revmagic-workspace.mjs"
 fi

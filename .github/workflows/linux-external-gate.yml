@@ -29,14 +29,15 @@ jobs:
         run: |
           git clone https://github.com/sasuketorii/notebooklm_mcp_with.git /tmp/notebooklm-fixture
           git -C /tmp/notebooklm-fixture checkout 798513bc08510f257c936d1ddbdd1b935d0c0a0a
-          git clone https://github.com/sasuketorii/revmagic.git /tmp/revmagic-fixture
-          git -C /tmp/revmagic-fixture checkout 7fb1cd0d0992abc676656de0b1a170c888c109e9
+          git clone https://github.com/sasuketorii/revmagic-runtime.git /tmp/revmagic-fixture
+          git -C /tmp/revmagic-fixture checkout 4f4bbcf565e2fb0da968971eb9f485a74bf3cac2
       - name: Unit, restart, deadline, and systemd lifecycle contracts
         run: |
           npm ci
           npm run check
           ./scripts/test-systemd-contract.sh
           ./scripts/test-workflow-pins.sh
+          node ./scripts/test-public-provenance.mjs
       - name: Clean verified fixture install and setup
         env:
           REV_CONTENT_TEST_NOTEBOOK_REPO: /tmp/notebooklm-fixture

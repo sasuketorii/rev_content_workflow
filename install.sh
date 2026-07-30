@@ -7,11 +7,10 @@ NOTEBOOK_COMMIT=798513bc08510f257c936d1ddbdd1b935d0c0a0a
 NOTEBOOK_PATCH_SHA256=de67f009ad09d6b9c15806d87d5efd85e20164965d5551cbde1b34be09dd4b05
 NOTEBOOK_BASE_LOCK_SHA256=2d99cf4f84b0beb609c0779b515234b32c7617611d81b70c525b6fb2de7900ac
 NOTEBOOK_PATCHED_LOCK_SHA256=07b8b69e7cb12d86f8abb8b9628e1bd50e91a5ef91728e32060b012fa5976082
-REVMAGIC_REPO_DEFAULT=https://github.com/sasuketorii/revmagic.git
-REVMAGIC_COMMIT=7fb1cd0d0992abc676656de0b1a170c888c109e9
-REVMAGIC_PATCH_SHA256=7a0a501d81cd69de96a64524d965b72d361b11a8da4a08a906795b2aa8d7d086
-REVMAGIC_BASE_LOCK_SHA256=a2290a8d9f1678123cdc2cc571ecbd6f1e69b075eddb59d780cb57bd03afe0c9
-REVMAGIC_ISOLATED_LOCK_SHA256=7c5e1d6a50c3027f99564f312c517c69def20d120d9bee3aee67c2929457a727
+REVMAGIC_REPO_DEFAULT=https://github.com/sasuketorii/revmagic-runtime.git
+REVMAGIC_COMMIT=4f4bbcf565e2fb0da968971eb9f485a74bf3cac2
+REVMAGIC_LOCK_SHA256=e03b200f5991fc97c3146d0e5e710d061f31c136d58a837ff95fa01c5d79b5da
+REVMAGIC_LICENSE_SHA256=f5e10e376c4fab85036c3b25e4609a9c70e736ddd88c3f4a88d8b55e21fd7acb
 
 DRY_RUN=0
 for arg in "$@"; do
@@ -31,7 +30,7 @@ case "$(uname -s):$(uname -m)" in
   *) echo "unsupported platform: $(uname -s) $(uname -m)" >&2; exit 1 ;;
 esac
 
-for command_name in git node npm cargo rustc shasum ffmpeg yt-dlp; do
+for command_name in git node npm cargo rustc shasum ffmpeg yt-dlp cmp; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     echo "missing prerequisite: $command_name" >&2
     exit 1
@@ -42,6 +41,13 @@ node -e 'const [major,minor]=process.versions.node.split(".").map(Number);if(maj
   { echo "Node.js >=22.13.0 is required" >&2; exit 1; }
 cargo --version >/dev/null 2>&1 && rustc --version >/dev/null 2>&1 ||
   { echo "a configured Rust toolchain is required" >&2; exit 1; }
+rustc_version=$(rustc --version)
+node -e '
+const match = process.argv[1].match(/^rustc (\d+)\.(\d+)\.(\d+)/);
+if (!match || Number(match[1]) < 1 ||
+    (Number(match[1]) === 1 && Number(match[2]) < 86)) process.exit(1);
+' "$rustc_version" ||
+  { echo "Rust 1.86.0 or newer is required" >&2; exit 1; }
 
 if [ "$(uname -s)" = Darwin ]; then
   DATA_BASE=${XDG_DATA_HOME:-"$HOME/Library/Application Support"}
@@ -220,7 +226,6 @@ verify_sha256() {
 }
 
 verify_sha256 "$NOTEBOOK_PATCH_SHA256" "$SCRIPT_DIR/patches/notebooklm-audio-custom.patch"
-verify_sha256 "$REVMAGIC_PATCH_SHA256" "$SCRIPT_DIR/patches/revmagic-optimize.patch"
 if [ -e "$RELEASE_DIR" ]; then
   node "$SCRIPT_DIR/scripts/hash-tree.mjs" verify "$RELEASE_DIR" >/dev/null
 fi
@@ -247,27 +252,22 @@ cp "$STAGE/notebook-src/package.json" "$STAGE/notebook-src/package-lock.json" \
 git clone --quiet --no-checkout "$REVMAGIC_REPO" "$STAGE/revmagic-src"
 git -C "$STAGE/revmagic-src" checkout --quiet --detach "$REVMAGIC_COMMIT"
 test "$(git -C "$STAGE/revmagic-src" rev-parse HEAD)" = "$REVMAGIC_COMMIT"
-verify_sha256 "$REVMAGIC_BASE_LOCK_SHA256" "$STAGE/revmagic-src/Cargo.lock"
-git -C "$STAGE/revmagic-src" apply --check "$SCRIPT_DIR/patches/revmagic-optimize.patch"
-git -C "$STAGE/revmagic-src" apply "$SCRIPT_DIR/patches/revmagic-optimize.patch"
-mkdir -p "$STAGE/revmagic-build/crates"
-cp -R "$STAGE/revmagic-src/crates/revmagic-core" \
-  "$STAGE/revmagic-src/crates/revmagic-cli" \
-  "$STAGE/revmagic-src/crates/revmagic-mcp" "$STAGE/revmagic-build/crates/"
-verify_sha256 "$REVMAGIC_ISOLATED_LOCK_SHA256" "$SCRIPT_DIR/locks/revmagic-isolated.Cargo.lock"
-cp "$SCRIPT_DIR/locks/revmagic-isolated.Cargo.lock" "$STAGE/revmagic-build/Cargo.lock"
-{
-  printf '%s\n' '[workspace]' 'resolver = "2"' 'members = ['
-  printf '%s\n' '  "crates/revmagic-core",' '  "crates/revmagic-cli",' '  "crates/revmagic-mcp",'
-  printf '%s\n' ']'
-} >"$STAGE/revmagic-build/Cargo.toml"
+verify_sha256 "$REVMAGIC_LOCK_SHA256" "$STAGE/revmagic-src/Cargo.lock"
+verify_sha256 "$REVMAGIC_LOCK_SHA256" "$SCRIPT_DIR/locks/revmagic-isolated.Cargo.lock"
+cmp "$SCRIPT_DIR/locks/revmagic-isolated.Cargo.lock" "$STAGE/revmagic-src/Cargo.lock"
+verify_sha256 "$REVMAGIC_LICENSE_SHA256" "$STAGE/revmagic-src/LICENSE"
+verify_sha256 "$REVMAGIC_LICENSE_SHA256" "$SCRIPT_DIR/LICENSES/RevMagic.txt"
+cmp "$SCRIPT_DIR/LICENSES/RevMagic.txt" "$STAGE/revmagic-src/LICENSE"
+cargo metadata --locked --no-deps --format-version 1 \
+  --manifest-path "$STAGE/revmagic-src/Cargo.toml" |
+  node "$SCRIPT_DIR/scripts/verify-revmagic-workspace.mjs"
 (
-  cd "$STAGE/revmagic-build"
+  cd "$STAGE/revmagic-src"
   cargo build --locked --release -p revmagic-cli -p revmagic-mcp
 )
 mkdir -p "$STAGE/release/deps/revmagic/bin"
-cp "$STAGE/revmagic-build/target/release/revmagic-cli" "$STAGE/release/deps/revmagic/bin/"
-cp "$STAGE/revmagic-build/target/release/revmagic-mcp" "$STAGE/release/deps/revmagic/bin/"
+cp "$STAGE/revmagic-src/target/release/revmagic-cli" "$STAGE/release/deps/revmagic/bin/"
+cp "$STAGE/revmagic-src/target/release/revmagic-mcp" "$STAGE/release/deps/revmagic/bin/"
 cp "$STAGE/revmagic-src/LICENSE" "$STAGE/release/deps/revmagic/"
 
 (
