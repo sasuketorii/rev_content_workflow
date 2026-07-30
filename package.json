@@ -1,0 +1,48 @@
+{
+  "name": "rev-content-workflow",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Durable user-local RevMagic and NotebookLM content workflow",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "rev-content": "./dist/src/distribution-cli.js",
+    "rev-content-job": "./dist/src/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "npm run typecheck && npm run lint && npm test",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "npm run build && node --test dist/test/*.test.js",
+    "test:distribution": "npm run build && node --test dist/test/distribution.test.js",
+    "release:verify": "sh scripts/verify-distribution.sh",
+    "release:archive": "sh scripts/build-release.sh",
+    "sbom": "node scripts/generate-sbom.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.1.1",
+    "eslint": "^10.8.0",
+    "typescript": "^6.0.2",
+    "typescript-eslint": "^8.65.0"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "files": [
+    "dist/src",
+    "install.sh",
+    "config.example.json",
+    "upstream.lock.json",
+    "distribution-manifest.json",
+    "patches",
+    "skills",
+    "packaging",
+    "scripts",
+    "LICENSE",
+    "LICENSES",
+    "README.md",
+    "README.ja.md"
+  ]
+}

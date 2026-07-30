@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rev Content"
+  short_description: "Install and run the durable RevMagic to NotebookLM workflow"
+  default_prompt: "Set up this rev-content repository for my available AI clients, authenticate interactively, run doctor, and process the URL I provide."

@@ -1,0 +1,39 @@
+{
+  "formatVersion": 1,
+  "generatedFor": "rev-content-workflow-0.1.0",
+  "dependencies": {
+    "notebooklm": {
+      "repository": "https://github.com/sasuketorii/notebooklm_mcp_with.git",
+      "upstreamRepository": "https://github.com/PleasePrompto/notebooklm-mcp.git",
+      "commit": "798513bc08510f257c936d1ddbdd1b935d0c0a0a",
+      "patch": "patches/notebooklm-audio-custom.patch",
+      "patchSha256": "de67f009ad09d6b9c15806d87d5efd85e20164965d5551cbde1b34be09dd4b05",
+      "lockfile": "package-lock.json",
+      "baseLockfileSha256": "2d99cf4f84b0beb609c0779b515234b32c7617611d81b70c525b6fb2de7900ac",
+      "patchedLockfileSha256": "07b8b69e7cb12d86f8abb8b9628e1bd50e91a5ef91728e32060b012fa5976082",
+      "toolContract": "CUSTOM_TOOL_CONTRACTS.json",
+      "patchedToolContractSha256": "0735b3c422127eb9754afbbdf64802b9a5b35f66be150f629cc92f40c4354a24",
+      "license": "MIT",
+      "licenseSha256": "0ad77d6e05eea79c29fbadce21fb7ed7aad883acde73f4a2c5fef77c9536cd07"
+    },
+    "revmagic": {
+      "repository": "https://github.com/sasuketorii/revmagic.git",
+      "commit": "7fb1cd0d0992abc676656de0b1a170c888c109e9",
+      "patch": "patches/revmagic-optimize.patch",
+      "patchSha256": "7a0a501d81cd69de96a64524d965b72d361b11a8da4a08a906795b2aa8d7d086",
+      "lockfile": "Cargo.lock",
+      "baseLockfileSha256": "a2290a8d9f1678123cdc2cc571ecbd6f1e69b075eddb59d780cb57bd03afe0c9",
+      "isolatedLockfile": "locks/revmagic-isolated.Cargo.lock",
+      "isolatedLockfileSha256": "7c5e1d6a50c3027f99564f312c517c69def20d120d9bee3aee67c2929457a727",
+      "toolSchema": {
+        "tools": [
+          "url_to_mp3",
+          "probe_url"
+        ],
+        "source": "crates/revmagic-mcp/src/tools.rs"
+      },
+      "license": "MIT",
+      "licenseSource": "patches/revmagic-optimize.patch"
+    }
+  }
+}

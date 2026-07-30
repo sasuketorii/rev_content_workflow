@@ -1,0 +1,4177 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 8170003..6d3d7c4 100755
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
+ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+ 
++## [Unreleased] - 0.0.6-dev.0
++
++### Added
++
++- Added first-class NotebookLM notebook creation and a bounded live
++  authentication preflight.
++- Added one-shot source-readiness polling for resumable host workflows.
++
++### Changed
++
++- Made the shared notebook library cross-process safe, atomically durable,
++  revisioned, externally refreshable, and fail-closed for unsafe or corrupt
++  files.
++- Added process/build/library freshness diagnostics to `get_health`.
++
+ ## [0.0.5] - 2026-07-26
+ 
+ ### Fixed
+diff --git a/CUSTOM_TOOL_CONTRACTS.json b/CUSTOM_TOOL_CONTRACTS.json
+index 8a21aee..2427195 100644
+--- a/CUSTOM_TOOL_CONTRACTS.json
++++ b/CUSTOM_TOOL_CONTRACTS.json
+@@ -1,7 +1,7 @@
+ {
+-  "contractSha256": "5d29204572fca133004a4ad3825bb95a13645efa0149231dda64b81fb8cb3352",
++  "contractSha256": "b17a80fa9d43258e27d5af9ce52a05986bd31f502198f3236aa9eac5ea57a778",
+   "formatVersion": 1,
+-  "toolCount": 4,
++  "toolCount": 6,
+   "tools": [
+     {
+       "annotations": {
+@@ -84,6 +84,69 @@
+       },
+       "name": "add_youtube_source"
+     },
++    {
++      "annotations": {
++        "destructiveHint": false,
++        "idempotentHint": true,
++        "openWorldHint": true,
++        "readOnlyHint": true
++      },
++      "inputSchema": {
++        "additionalProperties": false,
++        "properties": {
++          "show_browser": {
++            "type": "boolean"
++          },
++          "timeout_ms": {
++            "maximum": 60000,
++            "minimum": 5000,
++            "type": "integer"
++          }
++        },
++        "type": "object"
++      },
++      "name": "check_auth"
++    },
++    {
++      "annotations": {
++        "destructiveHint": false,
++        "idempotentHint": false,
++        "openWorldHint": true,
++        "readOnlyHint": false
++      },
++      "inputSchema": {
++        "additionalProperties": false,
++        "properties": {
++          "description": {
++            "maxLength": 500,
++            "type": "string"
++          },
++          "name": {
++            "maxLength": 120,
++            "minLength": 1,
++            "type": "string"
++          },
++          "show_browser": {
++            "type": "boolean"
++          },
++          "tags": {
++            "items": {
++              "maxLength": 80,
++              "type": "string"
++            },
++            "maxItems": 20,
++            "type": "array"
++          },
++          "timeout_ms": {
++            "maximum": 120000,
++            "minimum": 5000,
++            "type": "integer"
++          }
++        },
++        "type": "object"
++      },
++      "name": "create_notebook"
++    },
+     {
+       "annotations": {
+         "destructiveHint": false,
+@@ -184,7 +247,7 @@
+           },
+           "timeout_ms": {
+             "maximum": 600000,
+-            "minimum": 1,
++            "minimum": 0,
+             "type": "integer"
+           }
+         },
+diff --git a/README.md b/README.md
+index 509acd0..984b2a7 100644
+--- a/README.md
++++ b/README.md
+@@ -1,7 +1,7 @@
+ # NotebookLM MCP with Audio (custom fork)
+ 
+ Repository: <https://github.com/sasuketorii/notebooklm_mcp_with><br>
+-Release version and reviewed upstream provenance: [`RELEASE_PROVENANCE.json`](./RELEASE_PROVENANCE.json)
++Development version and reviewed upstream provenance: [`RELEASE_PROVENANCE.json`](./RELEASE_PROVENANCE.json) (`0.0.6-dev.0`, unreleased; latest published tag: `v0.0.5`)
+ 
+ This is a maintained custom fork of [PleasePrompto/notebooklm-mcp](https://github.com/PleasePrompto/notebooklm-mcp). It keeps NotebookLM chat, web-URL/text sources, library and audio-overview tools, and adds a bounded local-audio/YouTube workflow. It is intended for local or single-principal use through Codex or Claude Code; it is not an npm package release.
+ 
+@@ -12,6 +12,7 @@ This is a maintained custom fork of [PleasePrompto/notebooklm-mcp](https://githu
+ - `add_audio_source`: NotebookLMのファイル選択UIで音声を登録（外部ASRへ送信しない）。
+ - `add_youtube_source`: 公開YouTube URLをNotebookLMへ登録。
+ - `wait_for_source_ready`: ソース一覧のUI状態を安定ポーリング。
++- `check_auth`: MCP専用プロファイルで期限付きのライブ認証確認。
+ - `export_transcript`: ソースビューアに表示された文字列をmarkdown/jsonで保存。
+ - `audio-root` allowlist、SHA-256／サイズ receipt、入力形式・サイズ上限。
+ 
+@@ -26,8 +27,8 @@ The source viewer output is not an independently verified, verbatim transcript o
+ 
+ **Questions and sources:** `ask_question`, `add_source` (URL or pasted text), `add_audio_source`, `add_youtube_source`, `wait_for_source_ready`, `export_transcript`<br>
+ **Audio Overview:** `generate_audio`, `get_audio_status`, `download_audio`<br>
+-**Notebook library:** `add_notebook`, `list_notebooks`, `get_notebook`, `select_notebook`, `update_notebook`, `remove_notebook`, `search_notebooks`, `get_library_stats`<br>
+-**Sessions/system:** `list_sessions`, `close_session`, `reset_session`, `get_health`, `setup_auth`; compatibility endpoints `re_auth` (unavailable/fail-closed) and `cleanup_data` (preview-only)<br>
++**Notebook library:** `create_notebook`, `add_notebook`, `list_notebooks`, `get_notebook`, `select_notebook`, `update_notebook`, `remove_notebook`, `search_notebooks`, `get_library_stats`<br>
++**Sessions/system:** `list_sessions`, `close_session`, `reset_session`, `get_health`, `check_auth`, `setup_auth`; compatibility endpoints `re_auth` (unavailable/fail-closed) and `cleanup_data` (preview-only)<br>
+ 
+ Full schemas and return envelopes are in [`docs/tools.md`](./docs/tools.md).
+ 
+@@ -71,15 +72,15 @@ Run notebooklm-audio setup_auth with show_browser=true.
+ 
+ ## Workflows / ワークフロー
+ 
+-1. Select a notebook with `select_notebook`, or pass `notebook_id`/`notebook_url` on each call.
++1. With no library entry, call `create_notebook` (new empty notebook) or `add_notebook` (existing share URL); then select a notebook with `select_notebook`, or pass `notebook_id`/`notebook_url` on each call.
+ 2. Website: `add_source(type="url")`; YouTube: `add_youtube_source(url)`; local audio: `add_audio_source(file_paths=[...])`.
+-3. Wait with `wait_for_source_ready(source_names=[...])`.
++3. Poll with `wait_for_source_ready(source_names=[...], timeout_ms=0)`. Repeat after `recommended_retry_after_ms` until `completed=true`. Positive timeouts retain the legacy blocking mode.
+ 4. Ask with `ask_question`, or extract UI text with `export_transcript`.
+ 5. For Audio Overview use `generate_audio` → `get_audio_status` → `download_audio`.
+ 
+ Audio limits: 1–10 files per call, supported extensions (`mp3`, `m4a`, `aac`, `wav`, `flac`, `ogg`, `opus`), **200 MiB per file / 500 MiB total**. Files must be regular files beneath the configured `--audio-root`. NotebookLM indexing remains asynchronous.
+ 
+-音声は1回1〜10ファイル、対応拡張子は上記のみ、1ファイル200 MiB・合計500 MiBまでです。`--audio-root` 配下の通常ファイルだけが対象で、登録成功後もNotebookLMの解析は非同期です。必ず `wait_for_source_ready` を実行してから質問・出力してください。
++音声は1回1〜10ファイル、対応拡張子は上記のみ、1ファイル200 MiB・合計500 MiBまでです。`--audio-root` 配下の通常ファイルだけが対象で、登録成功後もNotebookLMの解析は非同期です。`wait_for_source_ready(timeout_ms=0)` を間隔を空けて実行し、準備完了後に質問・出力してください。
+ 
+ ## HTTP loopback and security / HTTPループバックと安全性
+ 
+@@ -110,6 +111,8 @@ NotebookLMのUI変更に対するAPI互換性は保証しません。継続運
+ 
+ Use one service OS user and one Chrome profile per Google account/trust boundary. Keep the audio inbox private and writable only by that service. Run HTTP on loopback and front it with a private, authenticated proxy if needed. Authentication uses a cross-process base-profile lease: contending runtime/setup operations return `profile_busy`; runtime may use a disposable isolated profile only with a bootstrap-eligible snapshot, while `single` never falls back. `re_auth` is unavailable and fails closed until safe staged-profile switching exists. `get_health` is offline: `runtime_verified` is live evidence from this process, `snapshot_usable` is unexpired persistent-cookie evidence, and neither guarantees Google will accept saved cookies on the next request.
+ 
++Codex Desktop, Codex CLI, and Claude may each keep a separate stdio server alive. They share one lock-protected, atomically written library and refresh it on every library read, so a long-lived client sees notebooks created by another process. `get_health` exposes the process instance, version, and library revision to identify an old binary. Tool-schema changes still require reconnecting that client. Use `check_auth` when live Google verification is needed; it returns only a sanitized status and never returns credentials, cookies, profile paths, or page content.
++
+ VPSでは実行専用OSユーザーとGoogleアカウントごとのChromeプロファイルを用意し、音声入力ディレクトリをそのユーザーだけが書けるようにします。認証・音声登録は同一プロファイルで直列化し、`setup_auth` と通常操作を同時実行しません。`re_auth` は現在利用できません。
+ 
+ ## Upstream updates / 上流追従
+diff --git a/RELEASE_PROVENANCE.json b/RELEASE_PROVENANCE.json
+index 7dfc74c..54a50c5 100644
+--- a/RELEASE_PROVENANCE.json
++++ b/RELEASE_PROVENANCE.json
+@@ -1,6 +1,8 @@
+ {
+   "distribution": "notebooklm-mcp-audio-custom",
+-  "custom_version": "0.0.5",
++  "custom_version": "0.0.6-dev.0",
++  "release_status": "unreleased",
++  "release_commit": null,
+   "upstream": {
+     "repository": "https://github.com/PleasePrompto/notebooklm-mcp.git",
+     "tag": "v2.0.0",
+diff --git a/docs/tools.md b/docs/tools.md
+index 69188d8..f36d4a3 100755
+--- a/docs/tools.md
++++ b/docs/tools.md
+@@ -1,6 +1,6 @@
+ # Tools
+ 
+-Every tool registered in custom version 0.0.5, with parameter schema, examples, return envelopes, bounds, and readiness/provenance caveats.
++Every tool registered in unreleased custom development version 0.0.6-dev.0, with parameter schema, examples, return envelopes, bounds, and readiness/provenance caveats.
+ 
+ The server returns each tool result wrapped as `{ "success": true, "data": <object> }` (or `{ "success": false, "error": <string> }`). The shapes below describe the inner `data`.
+ 
+@@ -157,7 +157,7 @@ verify transcript completeness or media correctness.
+ | Name | Type | Required | Notes |
+ |---|---|---|---|
+ | `source_names` | string[] | yes | 1–10 exact source-list titles, unique, max 300 chars each. |
+-| `timeout_ms` | integer | no | 1–600,000 ms; default 90,000. |
++| `timeout_ms` | integer | no | 0–600,000 ms; default 90,000. Use `0` for one-shot. |
+ | `poll_interval_ms` | integer | no | 50–30,000 ms; default 1,000. |
+ | `stable_polls` | integer | no | 1–20 consecutive ready probes; default 2. |
+ | `session_id` / `notebook_id` / `notebook_url` / `show_browser` | mixed | no | Shared targeting and browser visibility. |
+@@ -167,7 +167,7 @@ verify transcript completeness or media correctness.
+   "name": "wait_for_source_ready",
+   "arguments": {
+     "source_names": ["Never Gonna Give You Up — Rick Astley"],
+-    "timeout_ms": 120000
++    "timeout_ms": 0
+   }
+ }
+ ```
+@@ -175,6 +175,10 @@ verify transcript completeness or media correctness.
+ The result reports `status`/`overall` (`ready`, `processing`, `error`,
+ `not_found`, or `timeout`), one item per requested source with `name`, status,
+ and evidence, plus a limitation stating that this is UI readiness only.
++The response keeps `result` and `completed` and adds `poll_mode`, `resumable`,
++and `recommended_retry_after_ms`. For long processing, repeat the one-shot
++call after that interval instead of holding one MCP request open. Positive
++timeouts preserve the legacy blocking behavior.
+ 
+ ## export_transcript — custom fork
+ 
+@@ -370,6 +374,24 @@ Run `generate_audio` first if no Audio Overview exists yet.
+ 
+ ---
+ 
++## create_notebook — custom fork
++
++Create an empty notebook through the official NotebookLM homepage, register it
++in the local library, and select it as active. This is an external write and is
++not idempotent. Call only after the user asks to create a notebook. If the
++NotebookLM creation succeeds but the local library cannot be saved, the error
++contains the created URL so it can be recovered with `add_notebook`.
++
++| Name | Type | Required | Notes |
++|---|---|---|---|
++| `name` | string | no | Local display name. Defaults to a timestamped `New Notebook …` name. |
++| `description` | string | no | Local metadata description. |
++| `tags` | string[] | no | Local organization tags. |
++| `show_browser` | bool | no | Show the persistent authenticated browser. |
++| `timeout_ms` | integer | no | 5,000–120,000; default 60,000. |
++
++---
++
+ ## add_notebook
+ 
+ Add a NotebookLM share-URL to the local library. The tool description enforces a confirmation workflow on the host agent — do not call without explicit user consent.
+@@ -543,6 +565,7 @@ No parameters.
+   "headless": true,
+   "auto_login_enabled": false,
+   "stealth_enabled": true
++  // plus instance_id, pid, started_at, server/build version and library freshness fields
+ }
+ ```
+ 
+@@ -559,7 +582,26 @@ No parameters.
+ | `not_authenticated` | false | No recognized authentication evidence. |
+ 
+ When `authenticated=false` the response also carries a non-destructive
+-`troubleshooting_tip`. `get_health` never launches a browser or contacts Google.
++`troubleshooting_tip`. Additive diagnostics include `instance_id`, `pid`,
++`started_at`, `server_name`, `server_version`, `build_version`,
++`library_revision`, `library_mtime_ms`, `library_loaded_at`, `library_stale`,
++and `library_external_change_detected`. `get_health` never launches a browser
++or contacts Google.
++
++---
++
++## check_auth — custom fork
++
++Runs a bounded live preflight with the MCP-managed browser profile.
++
++| Name | Type | Required | Notes |
++|---|---|---|---|
++| `show_browser` | bool | no | Default `false`. |
++| `timeout_ms` | integer | no | 5,000–60,000 ms; default 15,000. |
++
++The sanitized `status` is `authenticated`, `unauthenticated`, `profile_busy`,
++`timeout`, or `error`. The response never includes cookies, credentials,
++browser content, profile paths, or raw exceptions.
+ 
+ ---
+ 
+diff --git a/docs/troubleshooting.md b/docs/troubleshooting.md
+index de8ee36..7ee8b9b 100755
+--- a/docs/troubleshooting.md
++++ b/docs/troubleshooting.md
+@@ -1,6 +1,6 @@
+ # Troubleshooting
+ 
+-A symptom → fix matrix for custom version 0.0.5. For the full env-var inventory, see [`configuration.md`](./configuration.md). The upstream base is recorded in `RELEASE_PROVENANCE.json`.
++A symptom → fix matrix for unreleased custom development version 0.0.6-dev.0. For the full env-var inventory, see [`configuration.md`](./configuration.md). The upstream base is recorded in `RELEASE_PROVENANCE.json`.
+ 
+ ## Chrome fails to launch (macOS Tahoe / Windows exit 21)
+ 
+@@ -37,6 +37,17 @@ Checks:
+ 3. Check `get_health`. `runtime_verified` means this process reached a ready
+    NotebookLM page. Snapshot statuses are offline evidence only and do not
+    inspect the current page.
++4. Call `check_auth` when live Google acceptance must be proven. A
++   `profile_busy` status means another MCP runtime owns the managed profile.
++
++## A client sees an empty or old library
++
++Current versions refresh the shared library on each read and serialize
++cross-process mutations. Inspect `instance_id`, `server_version`, and
++`library_revision` in `get_health`. If one client reports an older server
++version, reconnect that MCP client so it loads the current binary and tool
++schema. Do not delete `library.json`; invalid JSON is preserved and fails
++closed with a `.corrupt-*.bak` copy.
+ 
+ ## Session expired / repeated login prompts
+ 
+diff --git a/docs/usage-guide.md b/docs/usage-guide.md
+index 9ea83d3..7441e99 100755
+--- a/docs/usage-guide.md
++++ b/docs/usage-guide.md
+@@ -1,6 +1,6 @@
+ # Usage Guide
+ 
+-Practical end-to-end walkthroughs for custom version 0.0.5. Each section is a self-contained recipe with the exact tool calls / curl commands. The upstream base is recorded in `RELEASE_PROVENANCE.json`.
++Practical end-to-end walkthroughs for unreleased custom development version 0.0.6-dev.0. Each section is a self-contained recipe with the exact tool calls / curl commands. The upstream base is recorded in `RELEASE_PROVENANCE.json`.
+ 
+ - [First-time setup](#first-time-setup)
+ - [Multi-turn session pattern](#multi-turn-session-pattern)
+diff --git a/package-lock.json b/package-lock.json
+index 6892663..97931ac 100755
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1,12 +1,12 @@
+ {
+   "name": "notebooklm-mcp-audio-custom",
+-  "version": "0.0.5",
++  "version": "0.0.6-dev.0",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+       "name": "notebooklm-mcp-audio-custom",
+-      "version": "0.0.5",
++      "version": "0.0.6-dev.0",
+       "license": "MIT",
+       "dependencies": {
+         "@modelcontextprotocol/sdk": "^1.29.0",
+diff --git a/package.json b/package.json
+index bb53819..c6e50e8 100755
+--- a/package.json
++++ b/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "notebooklm-mcp-audio-custom",
+-  "version": "0.0.5",
++  "version": "0.0.6-dev.0",
+   "description": "MCP server for Google NotebookLM — chat, source ingestion, audio overviews, citations, stdio + Streamable-HTTP transports.",
+   "type": "module",
+   "bin": {
+@@ -12,13 +12,15 @@
+     "watch": "tsc --watch",
+     "dev": "tsx watch src/index.ts",
+     "prepare": "npm run build",
+-    "test": "npm run test:workflow-security && npm run test:lineage && npm run test:trusted-releases && npm run test:install-release && npm run test:auth-persistence && npm run test:tool-compatibility && npm run test:audio && npm run test:http && npm run test:core && npm run test:permissions && npm run test:launcher && npm run test:installer && npm run test:youtube && npm run test:readiness && npm run test:transcript && npm run test:workflow && npm run test:chat && npm run test:source-release",
++    "test": "npm run test:workflow-security && npm run test:lineage && npm run test:trusted-releases && npm run test:install-release && npm run test:auth-persistence && npm run test:tool-compatibility && npm run test:audio && npm run test:http && npm run test:core && npm run test:permissions && npm run test:launcher && npm run test:installer && npm run test:youtube && npm run test:readiness && npm run test:transcript && npm run test:create-notebook && npm run test:library-concurrency && npm run test:workflow && npm run test:chat && npm run test:source-release",
+     "test:auth-persistence": "npm run build && node scripts/test-auth-persistence.mjs",
+     "test:source-release": "bash scripts/test-source-release.sh",
+     "test:youtube": "node scripts/test-youtube-source.mjs",
+     "test:readiness": "node scripts/test-source-readiness.mjs",
+     "test:transcript": "node scripts/test-transcript-export.mjs",
+     "test:workflow": "node scripts/test-workflow-integration.mjs",
++    "test:create-notebook": "npm run build && node scripts/test-create-notebook.mjs",
++    "test:library-concurrency": "npm run build && node scripts/test-library-concurrency.mjs",
+     "test:chat": "npm run build && node scripts/test-chat-stability.mjs",
+     "test:audio": "npm run build && node scripts/test-audio-validation.mjs",
+     "test:http": "npm run build && node scripts/test-http-concurrency.mjs",
+diff --git a/scripts/test-auth-persistence.mjs b/scripts/test-auth-persistence.mjs
+index cf59ca8..cc841f6 100644
+--- a/scripts/test-auth-persistence.mjs
++++ b/scripts/test-auth-persistence.mjs
+@@ -12,12 +12,13 @@ import {
+   readSecureJson,
+   writeSecureJson,
+ } from "../dist/auth/auth-persistence.js";
+-import { ToolHandlers } from "../dist/tools/handlers.js";
++import { ToolHandlers, withTemporaryBrowserConfig } from "../dist/tools/handlers.js";
+ import {
+   SharedContextManager,
+   decideProfileMode,
+   shouldPublishRecoverySnapshot,
+ } from "../dist/session/shared-context-manager.js";
++import { SessionManager } from "../dist/session/session-manager.js";
+ import { CONFIG } from "../dist/config.js";
+ import { isChannelFailure, isProfileLockError } from "../dist/browser/chromium-fallback.js";
+ 
+@@ -372,6 +373,13 @@ try {
+   const healthLibrary = {
+     getActiveNotebook: () => null,
+     getStats: () => ({ total_notebooks: 0 }),
++    getMetadata: () => ({
++      revision: 7,
++      mtime_ms: 123,
++      loaded_at: "2026-01-01T00:00:00.000Z",
++      stale: false,
++      external_change_detected: true,
++    }),
+   };
+   const health = await new ToolHandlers(
+     healthSessions,
+@@ -381,6 +389,253 @@ try {
+   assert.equal(health.success, true);
+   assert.equal(health.data.authenticated, false);
+   assert.equal(health.data.auth_status, "snapshot_indeterminate");
++  assert.equal(health.data.library_revision, 7);
++  assert.equal(typeof health.data.instance_id, "string");
++  assert.equal(health.data.pid, process.pid);
++  assert.equal("cookies" in health.data, false);
++  assert.equal("storage_state" in health.data, false);
++  assert.equal(JSON.stringify(health.data).includes("profilePath"), false);
++
++  const checkAuthLibrary = healthLibrary;
++  const authenticatedSessions = {
++    ...healthSessions,
++    withSharedBrowserPage: async (operation) =>
++      operation({
++        goto: async () => undefined,
++        url: () => "https://notebooklm.google.com/",
++        locator: () => ({
++          first: () => ({ isVisible: async () => true }),
++        }),
++      }),
++  };
++  const liveAuth = await new ToolHandlers(
++    authenticatedSessions,
++    healthAuth,
++    checkAuthLibrary
++  ).handleCheckAuth({ timeout_ms: 5000 });
++  assert.equal(liveAuth.success, true);
++  assert.equal(liveAuth.data.status, "authenticated");
++  assert.equal(liveAuth.data.authenticated, true);
++
++  const sameOriginUnknown = await new ToolHandlers(
++    {
++      ...healthSessions,
++      withSharedBrowserPage: async (operation) =>
++        operation({
++          goto: async () => undefined,
++          url: () => "https://notebooklm.google.com/",
++          locator: () => ({
++            first: () => ({ isVisible: async () => false }),
++          }),
++        }),
++    },
++    healthAuth,
++    checkAuthLibrary
++  ).handleCheckAuth({ timeout_ms: 5000 });
++  assert.equal(sameOriginUnknown.data.status, "error");
++  assert.equal(sameOriginUnknown.data.authenticated, false);
++
++  const busyAuth = await new ToolHandlers(
++    {
++      ...healthSessions,
++      withSharedBrowserPage: async () => {
++        throw new Error("profile_busy: should not leak /private/profile/path");
++      },
++    },
++    healthAuth,
++    checkAuthLibrary
++  ).handleCheckAuth({ timeout_ms: 5000 });
++  assert.equal(busyAuth.success, true);
++  assert.equal(busyAuth.data.status, "profile_busy");
++  assert.equal(JSON.stringify(busyAuth).includes("/private/profile/path"), false);
++
++  const errorAuth = await new ToolHandlers(
++    {
++      ...healthSessions,
++      withSharedBrowserPage: async () => {
++        throw new Error("secret-cookie=value");
++      },
++    },
++    healthAuth,
++    checkAuthLibrary
++  ).handleCheckAuth({ timeout_ms: 5000 });
++  assert.equal(errorAuth.data.status, "error");
++  assert.equal(JSON.stringify(errorAuth).includes("secret-cookie"), false);
++
++  const launchTimeoutStarted = Date.now();
++  let launchAbortSettled = false;
++  const launchTimeout = await new ToolHandlers(
++    {
++      ...healthSessions,
++      withSharedBrowserPage: async (_operation, _showBrowser, _deadline, signal) =>
++        new Promise((_resolve, reject) => {
++          signal.addEventListener(
++            "abort",
++            () => {
++              setTimeout(() => {
++                launchAbortSettled = true;
++                reject(new Error("browser_operation_deadline_exceeded"));
++              }, 40);
++            },
++            { once: true }
++          );
++        }),
++    },
++    healthAuth,
++    checkAuthLibrary
++  ).handleCheckAuth({ timeout_ms: 5000 });
++  assert.equal(launchTimeout.data.status, "timeout");
++  assert.ok(Date.now() - launchTimeoutStarted < 5500);
++  let postTimeoutConfigRan = false;
++  const postTimeoutConfig = withTemporaryBrowserConfig(undefined, undefined, async () => {
++    postTimeoutConfigRan = true;
++  });
++  await new Promise((resolve) => setTimeout(resolve, 10));
++  assert.equal(postTimeoutConfigRan, false);
++  await postTimeoutConfig;
++  assert.equal(launchAbortSettled, true);
++  assert.equal(postTimeoutConfigRan, true);
++  assert.equal(CONFIG.browserTimeout, configSnapshot.browserTimeout);
++
++  // A config request that expires in the serialization queue never runs, but
++  // retains its FIFO slot until the preceding owner completes. A later request
++  // must not overlap that owner.
++  let releaseConfigHolder;
++  const configHolder = withTemporaryBrowserConfig(
++    { timeout_ms: 54321 },
++    undefined,
++    () =>
++      new Promise((resolve) => {
++        releaseConfigHolder = resolve;
++      })
++  );
++  await new Promise((resolve) => setTimeout(resolve, 10));
++  let expiredConfigOperationRan = false;
++  await assert.rejects(
++    withTemporaryBrowserConfig(
++      { timeout_ms: 12345 },
++      undefined,
++      async () => {
++        expiredConfigOperationRan = true;
++      },
++      Date.now() + 25
++    ),
++    /browser_config_deadline_exceeded/
++  );
++  let laterConfigOperationRan = false;
++  const laterConfigOperation = withTemporaryBrowserConfig(
++    { timeout_ms: 22222 },
++    undefined,
++    async () => {
++      laterConfigOperationRan = true;
++    }
++  );
++  await new Promise((resolve) => setTimeout(resolve, 10));
++  assert.equal(laterConfigOperationRan, false);
++  releaseConfigHolder();
++  await Promise.all([configHolder, laterConfigOperation]);
++  await new Promise((resolve) => setTimeout(resolve, 10));
++  assert.equal(expiredConfigOperationRan, false);
++  assert.equal(laterConfigOperationRan, true);
++
++  let delayedAcquireReleaseCount = 0;
++  const delayedAcquireManager = new SharedContextManager({
++    async acquireBaseProfileLease() {
++      await new Promise((resolve) => setTimeout(resolve, 25));
++      return {
++        onLost() {},
++        async release() {
++          delayedAcquireReleaseCount++;
++        },
++      };
++    },
++    async getValidStatePath() {
++      throw new Error("must not inspect state after deadline");
++    },
++  });
++  await assert.rejects(
++    delayedAcquireManager.getOrCreateContext(undefined, Date.now() + 10),
++    /browser_operation_deadline_exceeded/
++  );
++  await new Promise((resolve) => setTimeout(resolve, 30));
++  assert.equal(delayedAcquireReleaseCount, 1);
++
++  let stateFailureReleaseCount = 0;
++  const stateFailureManager = new SharedContextManager({
++    async acquireBaseProfileLease() {
++      return {
++        onLost() {},
++        async release() {
++          stateFailureReleaseCount++;
++        },
++      };
++    },
++    async getValidStatePath() {
++      throw new Error("snapshot inspection failed");
++    },
++  });
++  await assert.rejects(
++    stateFailureManager.getOrCreateContext(undefined, Date.now() + 1000),
++    /snapshot inspection failed/
++  );
++  assert.equal(stateFailureReleaseCount, 1);
++
++  // The absolute deadline reaches the real SharedContextManager launch path.
++  // A launcher that resolves late is closed immediately, releases its lease,
++  // and never reaches page creation.
++  let lateContextCloseCount = 0;
++  let lateContextPageCount = 0;
++  let lateLeaseReleaseCount = 0;
++  let observedLaunchTimeout = Infinity;
++  const lateContext = {
++    async close() {
++      lateContextCloseCount++;
++    },
++    async newPage() {
++      lateContextPageCount++;
++      throw new Error("late context must never create a page");
++    },
++  };
++  const lateSharedManager = new SharedContextManager(
++    {
++      async acquireBaseProfileLease() {
++        return {
++          onLost() {},
++          async release() {
++            lateLeaseReleaseCount++;
++          },
++        };
++      },
++      async getValidStatePath() {
++        return null;
++      },
++    },
++    {
++      async launchPersistentContext(_dir, options) {
++        observedLaunchTimeout = options.timeout;
++        await new Promise((resolve) => setTimeout(resolve, 35));
++        return lateContext;
++      },
++    }
++  );
++  const lateSessionManager = new SessionManager(
++    {},
++    { sharedContextManager: lateSharedManager }
++  );
++  await assert.rejects(
++    lateSessionManager.withSharedBrowserPage(
++      async () => {
++        throw new Error("late operation must never run");
++      },
++      undefined,
++      Date.now() + 20
++    ),
++    /browser_operation_deadline_exceeded/
++  );
++  assert.ok(observedLaunchTimeout <= 20);
++  assert.equal(lateContextCloseCount, 1);
++  assert.equal(lateContextPageCount, 0);
++  assert.equal(lateLeaseReleaseCount, 1);
+ 
+   // Exact health contract table. Only live readiness and durable persistent
+   // snapshot evidence set authenticated=true.
+@@ -560,6 +815,18 @@ try {
+   await externalFixture.manager.closeContext();
+   assert.deepEqual(externalFixture.counts(), { closeCount: 0, releaseCount: 1 });
+ 
++  const neverStartedAt = Date.now();
++  const neverReturningProbe = await new ToolHandlers(
++    {
++      ...healthSessions,
++      withSharedBrowserPage: async () => new Promise(() => undefined),
++    },
++    healthAuth,
++    checkAuthLibrary
++  ).handleCheckAuth({ timeout_ms: 5000 });
++  assert.equal(neverReturningProbe.data.status, "timeout");
++  assert.ok(Date.now() - neverStartedAt < 5500);
++
+   console.log(
+     "auth persistence checks passed: strict-schema, health-table, strategy-policy, generation-teardown, direct-lock-crash-race"
+   );
+diff --git a/scripts/test-core-concurrency.mjs b/scripts/test-core-concurrency.mjs
+index 0a0d704..feb0910 100644
+--- a/scripts/test-core-concurrency.mjs
++++ b/scripts/test-core-concurrency.mjs
+@@ -268,6 +268,87 @@ await failedCloseManager.getOrCreateSession("close-fails", notebookUrl);
+ await assert.rejects(() => failedCloseManager.closeSession("close-fails"));
+ assert.equal(failedCloseManager.getSession("close-fails"), null);
+ 
++// A shared-page request that expires behind the lifecycle queue must never
++// create a page later. Aborting an active probe closes only that probe page.
++let releaseProbeHolder;
++let pageCreateCount = 0;
++let pageCloseCount = 0;
++let sharedContextCloseCount = 0;
++const probeContext = {
++  async newPage() {
++    pageCreateCount += 1;
++    return {
++      async close() {
++        pageCloseCount += 1;
++      },
++    };
++  },
++};
++const probeSharedManager = {
++  needsHeadlessModeChange: () => false,
++  getOrCreateContext: async () => probeContext,
++  closeContext: async () => {
++    sharedContextCloseCount += 1;
++  },
++};
++const probeManager = new SessionManager({}, { sharedContextManager: probeSharedManager });
++const probeHolder = probeManager.withSharedBrowserPage(
++  () =>
++    new Promise((resolve) => {
++      releaseProbeHolder = resolve;
++    })
++);
++await delay(10);
++let expiredProbeRan = false;
++await assert.rejects(
++  probeManager.withSharedBrowserPage(
++    async () => {
++      expiredProbeRan = true;
++    },
++    undefined,
++    Date.now() + 25
++  ),
++  /browser_operation_deadline_exceeded/
++);
++let laterProbeRan = false;
++const laterProbe = probeManager.withSharedBrowserPage(async () => {
++  laterProbeRan = true;
++});
++await delay(10);
++assert.equal(laterProbeRan, false);
++releaseProbeHolder();
++await Promise.all([probeHolder, laterProbe]);
++await delay(10);
++assert.equal(expiredProbeRan, false);
++assert.equal(laterProbeRan, true);
++assert.equal(pageCreateCount, 2);
++
++const controller = new AbortController();
++let rejectProbeNavigation;
++probeContext.newPage = async () => {
++  pageCreateCount += 1;
++  return {
++    async close() {
++      pageCloseCount += 1;
++      rejectProbeNavigation?.(new Error("probe page closed"));
++    },
++  };
++};
++const activeProbe = probeManager.withSharedBrowserPage(
++  () =>
++    new Promise((_resolve, reject) => {
++      rejectProbeNavigation = reject;
++    }),
++  undefined,
++  Date.now() + 1000,
++  controller.signal
++);
++await delay(10);
++controller.abort();
++await assert.rejects(activeProbe, /probe page closed/);
++assert.equal(sharedContextCloseCount, 0);
++assert.ok(pageCloseCount >= 2, "each owned probe page must be closed");
++
+ const packageMetadata = JSON.parse(await readFile(new URL("../package.json", import.meta.url)));
+ assert.equal(SERVER_NAME, packageMetadata.name);
+ assert.equal(SERVER_VERSION, packageMetadata.version);
+diff --git a/scripts/test-source-readiness.mjs b/scripts/test-source-readiness.mjs
+index fc12859..c2119ec 100644
+--- a/scripts/test-source-readiness.mjs
++++ b/scripts/test-source-readiness.mjs
+@@ -24,6 +24,13 @@ assert.equal(classifySourceRows([row("Ａｌｐｈａ")], ["alpha"])[0].status,
+ const pageFor = (rows) => ({ locator: () => ({ evaluateAll: async () => rows }) });
+ const inspected = await inspectSourceReadiness(pageFor([row("Alpha")]), { sourceNames: ["Alpha"] });
+ assert.equal(inspected.overall, "ready");
++const oneShotStarted = Date.now();
++const oneShot = await waitForSourceReady(pageFor([row("Alpha", true)]), {
++  sourceNames: ["Alpha"],
++  timeoutMs: 0,
++});
++assert.equal(oneShot.status, "processing");
++assert.ok(Date.now() - oneShotStarted < 1000);
+ // DOM-equivalent snapshot: no checkbox, but an enabled exact stretched button
+ // is sufficient readiness evidence; busy/error still override it.
+ const domRow = ({ busy = false, error = false } = {}) => {
+diff --git a/src/index.ts b/src/index.ts
+index 5d1d530..8d0e0e3 100755
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -67,10 +67,11 @@ sources, ingest sources, generate Audio Overviews).
+ 
+ 1. \`get_health\` → inspect \`auth_status\` and \`auth_evidence\`. This is
+    offline and does not claim that Google currently accepts a saved cookie.
+-   Run \`setup_auth\` when authentication is needed (it opens a browser tab).
+-2. \`add_notebook\` to register a NotebookLM share-URL into the local
+-   library (the user must provide the URL — see add_notebook for the link
+-   workflow). Optionally \`select_notebook\` to make it the default.
++   Use \`check_auth\` for a bounded live check. Run \`setup_auth\` only when
++   authentication is needed (it opens a browser tab).
++2. If the library is empty, use \`create_notebook\` when the user asks for a
++   new empty notebook; it creates it in NotebookLM and selects the local entry.
++   Otherwise use \`add_notebook\` to register an existing NotebookLM share-URL.
+ 3. \`ask_question\` — start asking. Save the returned \`session_id\` and
+    reuse it for follow-up questions to keep context.
+ 
+@@ -97,6 +98,9 @@ Call \`add_source\` once per URL/text source. For local audio, call
+ file chooser and returns hashes plus source-panel verification.
+ NotebookLM crawls/indexes each source asynchronously; new sources are
+ typically queryable within 5–30 seconds after \`add_source\` succeeds.
++Prefer \`wait_for_source_ready(timeout_ms=0)\` for a one-shot status check
++and poll again after the returned retry interval. The legacy blocking mode
++remains available by passing a positive timeout.
+ 
+ ## Audio Overview (async chain — important)
+ 
+@@ -293,6 +297,18 @@ class NotebookLMMCPServer {
+             );
+             break;
+ 
++          case "create_notebook":
++            result = await this.toolHandlers.handleCreateNotebook(
++              args as {
++                name?: string;
++                description?: string;
++                tags?: string[];
++                show_browser?: boolean;
++                timeout_ms?: number;
++              }
++            );
++            break;
++
+           case "list_notebooks":
+             result = await this.toolHandlers.handleListNotebooks();
+             break;
+@@ -348,6 +364,12 @@ class NotebookLMMCPServer {
+             result = await this.toolHandlers.handleGetHealth();
+             break;
+ 
++          case "check_auth":
++            result = await this.toolHandlers.handleCheckAuth(
++              args as { show_browser?: boolean; timeout_ms?: number }
++            );
++            break;
++
+           case "setup_auth":
+             result = await this.toolHandlers.handleSetupAuth(
+               args as { show_browser?: boolean },
+diff --git a/src/library/notebook-library.ts b/src/library/notebook-library.ts
+old mode 100755
+new mode 100644
+index 93f45d9..282142f
+--- a/src/library/notebook-library.ts
++++ b/src/library/notebook-library.ts
+@@ -1,13 +1,17 @@
+ /**
+  * NotebookLM Library Manager
+  *
+- * Manages a persistent library of NotebookLM notebooks.
+- * Allows Claude to autonomously add, remove, and switch between
+- * multiple notebooks based on the task at hand.
++ * The library is shared by every Codex/Claude stdio process for the same OS
++ * account. Writes therefore use a cross-process lock and an atomic
++ * read-modify-write transaction. Readers refresh from disk so a long-lived
++ * process never serves a permanently stale startup snapshot.
+  */
+ 
+ import fs from "fs";
++import fsp from "fs/promises";
+ import path from "path";
++import { randomUUID } from "crypto";
++import lockfile from "proper-lockfile";
+ import { CONFIG } from "../config.js";
+ import { log } from "../utils/logger.js";
+ import { assertNotebookLmUrl } from "../notebooklm/notebook-url.js";
+@@ -19,63 +23,402 @@ import type {
+   LibraryStats,
+ } from "./types.js";
+ 
++type LibraryMetadata = {
++  revision: number;
++  mtime_ms: number | null;
++  loaded_at: string;
++  stale: boolean;
++  external_change_detected: boolean;
++};
++
++type NotebookLibraryOptions = {
++  libraryPath?: string;
++  writeFile?: (target: string, data: string) => void | Promise<void>;
++  lockStaleMs?: number;
++  lockUpdateMs?: number;
++};
++
++const MAX_LIBRARY_BYTES = 2 * 1024 * 1024;
++const MAX_NOTEBOOKS = 10_000;
++const MAX_STRING_BYTES = 16 * 1024;
++const MAX_ARRAY_ITEMS = 256;
++const NOFOLLOW = fs.constants.O_NOFOLLOW ?? 0;
++const DIRECTORY = fs.constants.O_DIRECTORY ?? 0;
++
++const cloneEntry = (notebook: NotebookEntry): NotebookEntry => ({
++  ...notebook,
++  topics: [...notebook.topics],
++  content_types: [...notebook.content_types],
++  use_cases: [...notebook.use_cases],
++  ...(notebook.tags ? { tags: [...notebook.tags] } : {}),
++});
++
++const cloneLibraryValue = (library: Library): Library => ({
++  ...library,
++  notebooks: library.notebooks.map(cloneEntry),
++});
++
+ export class NotebookLibrary {
+   private libraryPath: string;
++  private lockTargetPath: string;
+   private library: Library;
+-
+-  constructor() {
+-    this.libraryPath = path.join(CONFIG.dataDir, "library.json");
+-    this.library = this.loadLibrary();
++  private writeLibraryFile?: (path: string, data: string) => void | Promise<void>;
++  private loadedAt = new Date(0).toISOString();
++  private loadedMtimeMs: number | null = null;
++  private lastRefreshDetectedExternalChange = false;
++  private lockStaleMs: number;
++  private lockUpdateMs: number;
++  private activeLockCompromise: Error | undefined;
++
++  constructor(options: NotebookLibraryOptions = {}) {
++    this.libraryPath = options.libraryPath ?? path.join(CONFIG.dataDir, "library.json");
++    this.lockTargetPath = `${this.libraryPath}.guard`;
++    this.writeLibraryFile = options.writeFile;
++    this.lockStaleMs = options.lockStaleMs ?? 120_000;
++    this.lockUpdateMs = options.lockUpdateMs ?? 40_000;
++    fs.mkdirSync(path.dirname(this.libraryPath), { recursive: true, mode: 0o700 });
++    this.secureParentDirectorySync();
++    this.ensureLockTarget();
++    this.library = fs.existsSync(this.libraryPath)
++      ? this.readLibraryFailClosedSync(true)
++      : this.createDefaultLibrary();
++    if (fs.existsSync(this.libraryPath)) this.adopt(this.library);
+ 
+     log.info("📚 NotebookLibrary initialized");
+     log.info(`  Library path: ${this.libraryPath}`);
+     log.info(`  Notebooks: ${this.library.notebooks.length}`);
+-    if (this.library.active_notebook_id) {
+-      log.info(`  Active: ${this.library.active_notebook_id}`);
++    if (this.library.active_notebook_id) log.info(`  Active: ${this.library.active_notebook_id}`);
++  }
++
++  private ensureLockTarget(): void {
++    let fd: number | undefined;
++    try {
++      fd = fs.openSync(
++        this.lockTargetPath,
++        fs.constants.O_RDWR | fs.constants.O_CREAT | fs.constants.O_EXCL | NOFOLLOW,
++        0o600
++      );
++    } catch (error) {
++      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
++      fd = fs.openSync(this.lockTargetPath, fs.constants.O_RDWR | NOFOLLOW);
++    }
++    try {
++      const stat = fs.fstatSync(fd);
++      this.normalizeSecureFileModeSync(fd, stat, "library lock target");
++    } finally {
++      fs.closeSync(fd);
+     }
+   }
+ 
+-  /**
+-   * Load library from disk, or create default if not exists
+-   */
+-  private loadLibrary(): Library {
++  private async withLock<T>(operation: () => Promise<T> | T): Promise<T> {
++    let release: (() => Promise<void>) | undefined;
++    let compromised: Error | undefined;
+     try {
++      release = await lockfile.lock(this.lockTargetPath, {
++        realpath: false,
++        // Library I/O is capped at 2 MiB and uses async filesystem calls so
++        // proper-lockfile's heartbeat can run throughout the critical section.
++        stale: this.lockStaleMs,
++        update: this.lockUpdateMs,
++        retries: {
++          retries: 300,
++          factor: 1,
++          minTimeout: 25,
++          maxTimeout: 100,
++          randomize: true,
++        },
++        onCompromised: (error) => {
++          compromised = error;
++          this.activeLockCompromise = error;
++        },
++      });
++      this.activeLockCompromise = undefined;
++      const result = await operation();
++      if (compromised || this.activeLockCompromise)
++        throw new Error("library_lock_compromised", {
++          cause: compromised ?? this.activeLockCompromise,
++        });
++      return result;
++    } catch (error) {
++      const code = (error as NodeJS.ErrnoException).code;
++      if (!release && (code === "ELOCKED" || code === "ECOMPROMISED"))
++        throw new Error("library_busy", { cause: error });
++      throw error;
++    } finally {
++      this.activeLockCompromise = undefined;
++      if (release)
++        await release().catch((error) => {
++          if ((error as NodeJS.ErrnoException).code !== "ERELEASED") throw error;
++        });
++    }
++  }
++
++  private async ensureInitialized(): Promise<void> {
++    if (fs.existsSync(this.libraryPath)) return;
++    await this.withLock(async () => {
+       if (fs.existsSync(this.libraryPath)) {
+-        const data = fs.readFileSync(this.libraryPath, "utf-8");
+-        const library = JSON.parse(data) as Library;
+-        log.success(`  ✅ Loaded library with ${library.notebooks.length} notebooks`);
+-        return library;
++        const loaded = await this.readLibraryFailClosed(true);
++        this.adopt(loaded);
++        return;
++      }
++      const initial = this.createDefaultLibrary();
++      initial.revision = 1;
++      const saved = await this.persistAtomic(initial);
++      this.adopt(saved);
++    });
++  }
++
++  private validateLibrary(value: unknown): Library {
++    if (!value || typeof value !== "object") throw new Error("library root must be an object");
++    const candidate = value as Partial<Library>;
++    if (!Array.isArray(candidate.notebooks)) throw new Error("library.notebooks must be an array");
++    if (candidate.notebooks.length > MAX_NOTEBOOKS)
++      throw new Error(`library.notebooks exceeds ${MAX_NOTEBOOKS} entries`);
++    if (candidate.active_notebook_id !== null && typeof candidate.active_notebook_id !== "string")
++      throw new Error("library.active_notebook_id must be a string or null");
++    if (typeof candidate.last_modified !== "string")
++      throw new Error("library.last_modified must be a string");
++    if (typeof candidate.version !== "string") throw new Error("library.version must be a string");
++    if (
++      candidate.revision !== undefined &&
++      (!Number.isSafeInteger(candidate.revision) || (candidate.revision ?? -1) < 0)
++    )
++      throw new Error("library.revision must be a non-negative integer");
++
++    const notebooks = candidate.notebooks.map((raw, index) => {
++      if (!raw || typeof raw !== "object") throw new Error(`notebooks[${index}] must be an object`);
++      const notebook = raw as Partial<NotebookEntry>;
++      for (const key of ["id", "url", "name", "description", "added_at", "last_used"] as const) {
++        if (typeof notebook[key] !== "string")
++          throw new Error(`notebooks[${index}].${key} must be a string`);
++        this.assertBoundedString(notebook[key], `notebooks[${index}].${key}`);
++      }
++      for (const key of ["topics", "content_types", "use_cases"] as const) {
++        if (
++          !Array.isArray(notebook[key]) ||
++          !notebook[key]?.every((item) => typeof item === "string")
++        )
++          throw new Error(`notebooks[${index}].${key} must be a string array`);
++        this.assertBoundedStringArray(notebook[key]!, `notebooks[${index}].${key}`);
+       }
++      if (notebook.tags !== undefined) {
++        if (
++          !Array.isArray(notebook.tags) ||
++          !notebook.tags.every((item) => typeof item === "string")
++        )
++          throw new Error(`notebooks[${index}].tags must be a string array`);
++        this.assertBoundedStringArray(notebook.tags, `notebooks[${index}].tags`);
++      }
++      if (!Number.isSafeInteger(notebook.use_count) || (notebook.use_count ?? -1) < 0)
++        throw new Error(`notebooks[${index}].use_count must be a non-negative integer`);
++      return { ...notebook, url: assertNotebookLmUrl(notebook.url!) } as NotebookEntry;
++    });
++    const ids = new Set(notebooks.map((notebook) => notebook.id));
++    if (ids.size !== notebooks.length) throw new Error("library notebook IDs must be unique");
++    if (candidate.active_notebook_id && !ids.has(candidate.active_notebook_id))
++      throw new Error("library.active_notebook_id does not reference an existing notebook");
++
++    return {
++      notebooks: notebooks.map(cloneEntry),
++      active_notebook_id: candidate.active_notebook_id,
++      last_modified: candidate.last_modified,
++      version: candidate.version,
++      revision: candidate.revision ?? 0,
++    };
++  }
++
++  private assertSecureFile(stat: fs.Stats, label: string): void {
++    if (!stat.isFile() || stat.isSymbolicLink())
++      throw new Error(`${label} must be a regular non-symlink file`);
++    if (stat.nlink !== 1) throw new Error(`${label} must not have hard links`);
++    if (typeof process.getuid === "function" && stat.uid !== process.getuid())
++      throw new Error(`${label} is not owned by the current OS user`);
++    if ((stat.mode & 0o777) !== 0o600) throw new Error(`${label} permissions must be 0600`);
++    if (stat.size > MAX_LIBRARY_BYTES) throw new Error(`${label} exceeds 2 MiB`);
++  }
++
++  private secureParentDirectorySync(): void {
++    const parent = path.dirname(this.libraryPath);
++    const fd = fs.openSync(parent, fs.constants.O_RDONLY | DIRECTORY | NOFOLLOW);
++    try {
++      const stat = fs.fstatSync(fd);
++      if (!stat.isDirectory()) throw new Error("library parent must be a directory");
++      if (typeof process.getuid === "function" && stat.uid !== process.getuid())
++        throw new Error("library parent is not owned by the current OS user");
++      if ((stat.mode & 0o077) !== 0)
++        throw new Error("library parent permissions must not allow group or other access");
++    } finally {
++      fs.closeSync(fd);
++    }
++  }
++
++  private normalizeSecureFileModeSync(fd: number, stat: fs.Stats, label: string): fs.Stats {
++    if (!stat.isFile() || stat.isSymbolicLink())
++      throw new Error(`${label} must be a regular non-symlink file`);
++    if (stat.nlink !== 1) throw new Error(`${label} must not have hard links`);
++    if (typeof process.getuid === "function" && stat.uid !== process.getuid())
++      throw new Error(`${label} is not owned by the current OS user`);
++    if ((stat.mode & 0o777) !== 0o600) {
++      fs.fchmodSync(fd, 0o600);
++      stat = fs.fstatSync(fd);
++    }
++    this.assertSecureFile(stat, label);
++    return stat;
++  }
++
++  private async normalizeSecureFileMode(
++    handle: fsp.FileHandle,
++    stat: fs.Stats,
++    label: string
++  ): Promise<fs.Stats> {
++    if (!stat.isFile() || stat.isSymbolicLink())
++      throw new Error(`${label} must be a regular non-symlink file`);
++    if (stat.nlink !== 1) throw new Error(`${label} must not have hard links`);
++    if (typeof process.getuid === "function" && stat.uid !== process.getuid())
++      throw new Error(`${label} is not owned by the current OS user`);
++    if ((stat.mode & 0o777) !== 0o600) {
++      await handle.chmod(0o600);
++      stat = await handle.stat();
++    }
++    this.assertSecureFile(stat, label);
++    return stat;
++  }
++
++  private assertPathIdentity(opened: fs.Stats, current: fs.Stats): void {
++    if (
++      current.isSymbolicLink() ||
++      !current.isFile() ||
++      opened.dev !== current.dev ||
++      opened.ino !== current.ino ||
++      opened.size !== current.size
++    )
++      throw new Error("library.json changed during secure read");
++  }
++
++  private readSecureBytesSync(): Buffer {
++    const fd = fs.openSync(this.libraryPath, fs.constants.O_RDONLY | NOFOLLOW);
++    try {
++      const before = this.normalizeSecureFileModeSync(fd, fs.fstatSync(fd), "library.json");
++      const bytes = Buffer.alloc(before.size);
++      let offset = 0;
++      while (offset < bytes.length) {
++        const read = fs.readSync(fd, bytes, offset, bytes.length - offset, offset);
++        if (read === 0) throw new Error("library.json truncated during secure read");
++        offset += read;
++      }
++      const after = fs.fstatSync(fd);
++      this.assertPathIdentity(before, after);
++      this.assertPathIdentity(after, fs.lstatSync(this.libraryPath));
++      return bytes;
++    } finally {
++      fs.closeSync(fd);
++    }
++  }
++
++  private async readSecureBytes(): Promise<Buffer> {
++    let lastError: unknown;
++    for (let attempt = 0; attempt < 2; attempt += 1) {
++      const handle = await fsp.open(this.libraryPath, fs.constants.O_RDONLY | NOFOLLOW);
++      try {
++        const before = await this.normalizeSecureFileMode(
++          handle,
++          await handle.stat(),
++          "library.json"
++        );
++        const bytes = Buffer.alloc(before.size);
++        let offset = 0;
++        while (offset < bytes.length) {
++          const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, offset);
++          if (bytesRead === 0) throw new Error("library.json truncated during secure read");
++          offset += bytesRead;
++        }
++        const after = await handle.stat();
++        this.assertPathIdentity(before, after);
++        this.assertPathIdentity(after, await fsp.lstat(this.libraryPath));
++        return bytes;
++      } catch (error) {
++        lastError = error;
++      } finally {
++        await handle.close();
++      }
++    }
++    throw lastError;
++  }
++
++  private preserveCorruptFileSync(bytes: Buffer): string {
++    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
++    const backup = `${this.libraryPath}.corrupt-${stamp}-${process.pid}.bak`;
++    const fd = fs.openSync(
++      backup,
++      fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | NOFOLLOW,
++      0o600
++    );
++    try {
++      fs.writeFileSync(fd, bytes);
++      fs.fsyncSync(fd);
++    } finally {
++      fs.closeSync(fd);
++    }
++    return path.basename(backup);
++  }
++
++  private readLibraryFailClosedSync(preserveOnError = false): Library {
++    let bytes: Buffer | undefined;
++    try {
++      bytes = this.readSecureBytesSync();
++      return this.validateLibrary(JSON.parse(bytes.toString("utf-8")));
+     } catch (error) {
+-      log.warning(`  ⚠️  Failed to load library: ${error}`);
++      let backup = "backup_failed";
++      if (preserveOnError && bytes) {
++        try {
++          backup = this.preserveCorruptFileSync(bytes);
++        } catch (backupError) {
++          log.error(`  ❌ Failed to preserve invalid library: ${backupError}`);
++        }
++      }
++      const message = error instanceof Error ? error.message : String(error);
++      throw new Error(
++        `library_invalid: refusing to overwrite invalid library.json (${message}); backup=${backup}`,
++        { cause: error }
++      );
+     }
++  }
+ 
+-    // Create default library with current CONFIG as first entry
+-    log.info("  🆕 Creating new library...");
+-    const defaultLibrary = this.createDefaultLibrary();
+-    this.saveLibrary(defaultLibrary);
+-    return defaultLibrary;
++  private async readLibraryFailClosed(preserveOnError = false): Promise<Library> {
++    let bytes: Buffer | undefined;
++    try {
++      bytes = await this.readSecureBytes();
++      return this.validateLibrary(JSON.parse(bytes.toString("utf-8")));
++    } catch (error) {
++      let backup = "backup_failed";
++      if (preserveOnError && bytes) {
++        try {
++          backup = this.preserveCorruptFileSync(bytes);
++        } catch (backupError) {
++          log.error(`  ❌ Failed to preserve invalid library: ${backupError}`);
++        }
++      }
++      const message = error instanceof Error ? error.message : String(error);
++      throw new Error(
++        `library_invalid: refusing to overwrite invalid library.json (${message}); backup=${backup}`,
++        { cause: error }
++      );
++    }
+   }
+ 
+-  /**
+-   * Create default library from current CONFIG
+-   */
+   private createDefaultLibrary(): Library {
+     const hasConfig =
+       CONFIG.notebookUrl &&
+       CONFIG.notebookDescription &&
+       CONFIG.notebookDescription !==
+         "General knowledge base - configure NOTEBOOK_DESCRIPTION to help Claude understand what's in this notebook";
+-
+     const notebooks: NotebookEntry[] = [];
+-
+     if (hasConfig) {
+-      // Create first entry from CONFIG
+-      const id = this.generateId(CONFIG.notebookDescription);
++      const id = this.generateId({ notebooks } as Library, CONFIG.notebookDescription);
+       notebooks.push({
+         id,
+-        url: CONFIG.notebookUrl,
+-        name: CONFIG.notebookDescription.substring(0, 50), // First 50 chars as name
++        url: assertNotebookLmUrl(CONFIG.notebookUrl),
++        name: CONFIG.notebookDescription.substring(0, 50),
+         description: CONFIG.notebookDescription,
+         topics: CONFIG.notebookTopics,
+         content_types: CONFIG.notebookContentTypes,
+@@ -85,238 +428,252 @@ export class NotebookLibrary {
+         use_count: 0,
+         tags: [],
+       });
+-
+-      log.success(`  ✅ Created default notebook: ${id}`);
+     }
+-
+     return {
+       notebooks,
+       active_notebook_id: notebooks.length > 0 ? notebooks[0].id : null,
+       last_modified: new Date().toISOString(),
+       version: "1.0.0",
++      revision: 0,
+     };
+   }
+ 
+-  /**
+-   * Save library to disk
+-   */
+-  private saveLibrary(library: Library): void {
++  private async persistAtomic(library: Library): Promise<Library> {
++    if (this.activeLockCompromise) throw new Error("library_lock_compromised");
++    const candidate = this.validateLibrary(
++      cloneLibraryValue({
++        ...library,
++        last_modified: new Date().toISOString(),
++      })
++    );
++    const data = JSON.stringify(candidate, null, 2);
++    if (Buffer.byteLength(data, "utf-8") > MAX_LIBRARY_BYTES)
++      throw new Error("library exceeds 2 MiB");
++    const tempPath = path.join(
++      path.dirname(this.libraryPath),
++      `.${path.basename(this.libraryPath)}.${process.pid}.${randomUUID()}.tmp`
++    );
++    let handle: fsp.FileHandle | undefined;
+     try {
+-      library.last_modified = new Date().toISOString();
+-      const data = JSON.stringify(library, null, 2);
+-      fs.writeFileSync(this.libraryPath, data, "utf-8");
+-      this.library = library;
+-      log.success(`  💾 Library saved (${library.notebooks.length} notebooks)`);
++      handle = await fsp.open(
++        tempPath,
++        fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | NOFOLLOW,
++        0o600
++      );
++      if (this.writeLibraryFile) {
++        await handle.close();
++        handle = undefined;
++        await this.writeLibraryFile(tempPath, data);
++        handle = await fsp.open(tempPath, fs.constants.O_RDONLY | NOFOLLOW);
++      } else {
++        await handle.writeFile(data, "utf-8");
++      }
++      await this.normalizeSecureFileMode(handle, await handle.stat(), "library temp file");
++      await handle.sync();
++      await handle.close();
++      handle = undefined;
++      if (fs.existsSync(this.libraryPath)) await this.readSecureBytes();
++      if (this.activeLockCompromise) throw new Error("library_lock_compromised");
++      await fsp.rename(tempPath, this.libraryPath);
++      const committed = await fsp.lstat(this.libraryPath);
++      this.assertSecureFile(committed, "library.json");
++      try {
++        const dirHandle = await fsp.open(path.dirname(this.libraryPath), "r");
++        try {
++          await dirHandle.sync();
++        } finally {
++          await dirHandle.close();
++        }
++      } catch (error) {
++        // Some filesystems do not support directory fsync. The file itself was
++        // fsynced before rename, so retain compatibility while logging clearly.
++        log.warning(`  ⚠️  Directory fsync unavailable: ${error}`);
++      }
++      return candidate;
+     } catch (error) {
+-      log.error(`  ❌ Failed to save library: ${error}`);
+-      throw error;
++      await handle?.close().catch(() => undefined);
++      await fsp.unlink(tempPath).catch(() => undefined);
++      const message = error instanceof Error ? error.message : String(error);
++      throw new Error(`library_write_failed: ${message}`, { cause: error });
++    }
++  }
++
++  private adopt(library: Library): void {
++    this.library = cloneLibraryValue(library);
++    this.loadedAt = new Date().toISOString();
++    try {
++      this.loadedMtimeMs = fs.statSync(this.libraryPath).mtimeMs;
++    } catch {
++      this.loadedMtimeMs = null;
++    }
++  }
++
++  private async refreshFromDisk(): Promise<void> {
++    await this.ensureInitialized();
++    const disk = await this.readLibraryFailClosed(false);
++    const changed =
++      (disk.revision ?? 0) !== (this.library.revision ?? 0) ||
++      disk.last_modified !== this.library.last_modified;
++    this.lastRefreshDetectedExternalChange = this.lastRefreshDetectedExternalChange || changed;
++    if (changed) this.adopt(disk);
++    else {
++      try {
++        this.loadedMtimeMs = fs.statSync(this.libraryPath).mtimeMs;
++      } catch {
++        this.loadedMtimeMs = null;
++      }
+     }
+   }
+ 
+-  /**
+-   * Generate a unique ID from a string (slug format)
+-   */
+-  private generateId(name: string): string {
++  private async mutate<T>(operation: (candidate: Library) => T): Promise<T> {
++    await this.ensureInitialized();
++    return this.withLock(async () => {
++      const disk = await this.readLibraryFailClosed(true);
++      const candidate = cloneLibraryValue(disk);
++      const externalChange =
++        (disk.revision ?? 0) !== (this.library.revision ?? 0) ||
++        disk.last_modified !== this.library.last_modified;
++      const result = operation(candidate);
++      candidate.revision = (disk.revision ?? 0) + 1;
++      const saved = await this.persistAtomic(candidate);
++      this.adopt(saved);
++      this.lastRefreshDetectedExternalChange =
++        this.lastRefreshDetectedExternalChange || externalChange;
++      log.success(`  💾 Library saved (${saved.notebooks.length} notebooks)`);
++      return result;
++    });
++  }
++
++  private generateId(library: Pick<Library, "notebooks">, name: string): string {
+     const base = name
+       .toLowerCase()
+       .replace(/[^a-z0-9]+/g, "-")
+       .replace(/^-+|-+$/g, "")
+       .substring(0, 30);
+-
+-    // Ensure uniqueness
+-    let id = base;
++    let id = base || "notebook";
+     let counter = 1;
+-    while (this.library.notebooks.some((n) => n.id === id)) {
+-      id = `${base}-${counter}`;
+-      counter++;
++    while (library.notebooks.some((notebook) => notebook.id === id)) {
++      id = `${base || "notebook"}-${counter++}`;
+     }
+-
+     return id;
+   }
+ 
+-  /**
+-   * Add a new notebook to the library
+-   */
+-  addNotebook(input: AddNotebookInput): NotebookEntry {
+-    log.info(`📝 Adding notebook: ${input.name}`);
+-
+-    // Generate ID
+-    const id = this.generateId(input.name);
+-
+-    // Create entry
+-    const notebook: NotebookEntry = {
+-      id,
+-      url: assertNotebookLmUrl(input.url),
+-      name: input.name,
+-      description: input.description,
+-      topics: input.topics,
+-      content_types: input.content_types || ["documentation", "examples"],
+-      use_cases: input.use_cases || [
+-        `Learning about ${input.name}`,
+-        `Implementing features with ${input.name}`,
+-      ],
+-      added_at: new Date().toISOString(),
+-      last_used: new Date().toISOString(),
+-      use_count: 0,
+-      tags: input.tags || [],
+-    };
+-
+-    // Add to library
+-    const updated = { ...this.library };
+-    updated.notebooks.push(notebook);
+-
+-    // Set as active if it's the first notebook
+-    if (updated.notebooks.length === 1) {
+-      updated.active_notebook_id = id;
+-    }
+-
+-    this.saveLibrary(updated);
+-    log.success(`✅ Notebook added: ${id}`);
+-
+-    return notebook;
++  async addNotebook(input: AddNotebookInput): Promise<NotebookEntry> {
++    this.assertMutationInput(input);
++    const validatedUrl = assertNotebookLmUrl(input.url);
++    return this.mutate((updated) => {
++      const id = this.generateId(updated, input.name);
++      const notebook: NotebookEntry = {
++        id,
++        url: validatedUrl,
++        name: input.name,
++        description: input.description,
++        topics: [...input.topics],
++        content_types: [...(input.content_types || ["documentation", "examples"])],
++        use_cases: [
++          ...(input.use_cases || [
++            `Learning about ${input.name}`,
++            `Implementing features with ${input.name}`,
++          ]),
++        ],
++        added_at: new Date().toISOString(),
++        last_used: new Date().toISOString(),
++        use_count: 0,
++        tags: [...(input.tags || [])],
++      };
++      updated.notebooks.push(notebook);
++      if (updated.notebooks.length === 1) updated.active_notebook_id = id;
++      return cloneEntry(notebook);
++    });
+   }
+ 
+-  /**
+-   * List all notebooks in library
+-   */
+-  listNotebooks(): NotebookEntry[] {
+-    return this.library.notebooks;
++  async listNotebooks(): Promise<NotebookEntry[]> {
++    await this.refreshFromDisk();
++    return this.library.notebooks.map(cloneEntry);
+   }
+ 
+-  /**
+-   * Get a specific notebook by ID
+-   */
+-  getNotebook(id: string): NotebookEntry | null {
+-    return this.library.notebooks.find((n) => n.id === id) || null;
++  async getNotebook(id: string): Promise<NotebookEntry | null> {
++    await this.refreshFromDisk();
++    const notebook = this.library.notebooks.find((entry) => entry.id === id);
++    return notebook ? cloneEntry(notebook) : null;
+   }
+ 
+-  /**
+-   * Get the currently active notebook
+-   */
+-  getActiveNotebook(): NotebookEntry | null {
+-    if (!this.library.active_notebook_id) {
+-      return null;
+-    }
+-    return this.getNotebook(this.library.active_notebook_id);
++  async getActiveNotebook(): Promise<NotebookEntry | null> {
++    await this.refreshFromDisk();
++    if (!this.library.active_notebook_id) return null;
++    const notebook = this.library.notebooks.find(
++      (entry) => entry.id === this.library.active_notebook_id
++    );
++    return notebook ? cloneEntry(notebook) : null;
+   }
+ 
+-  /**
+-   * Select a notebook as active
+-   */
+-  selectNotebook(id: string): NotebookEntry {
+-    const notebook = this.getNotebook(id);
+-    if (!notebook) {
+-      throw new Error(`Notebook not found: ${id}`);
+-    }
+-
+-    log.info(`🎯 Selecting notebook: ${id}`);
+-
+-    const updated = { ...this.library };
+-    updated.active_notebook_id = id;
+-
+-    // Update last_used
+-    const notebookIndex = updated.notebooks.findIndex((n) => n.id === id);
+-    updated.notebooks[notebookIndex] = {
+-      ...notebook,
+-      last_used: new Date().toISOString(),
+-    };
+-
+-    this.saveLibrary(updated);
+-    log.success(`✅ Active notebook: ${id}`);
+-
+-    return updated.notebooks[notebookIndex];
++  async selectNotebook(id: string): Promise<NotebookEntry> {
++    return this.mutate((updated) => {
++      const index = updated.notebooks.findIndex((entry) => entry.id === id);
++      if (index === -1) throw new Error(`Notebook not found: ${id}`);
++      updated.active_notebook_id = id;
++      updated.notebooks[index] = {
++        ...updated.notebooks[index],
++        last_used: new Date().toISOString(),
++      };
++      return cloneEntry(updated.notebooks[index]);
++    });
+   }
+ 
+-  /**
+-   * Update notebook metadata
+-   */
+-  updateNotebook(input: UpdateNotebookInput): NotebookEntry {
+-    const notebook = this.getNotebook(input.id);
+-    if (!notebook) {
+-      throw new Error(`Notebook not found: ${input.id}`);
+-    }
+-
+-    log.info(`📝 Updating notebook: ${input.id}`);
+-
+-    const updated = { ...this.library };
+-    const index = updated.notebooks.findIndex((n) => n.id === input.id);
+-
+-    updated.notebooks[index] = {
+-      ...notebook,
+-      ...(input.name && { name: input.name }),
+-      ...(input.description && { description: input.description }),
+-      ...(input.topics && { topics: input.topics }),
+-      ...(input.content_types && { content_types: input.content_types }),
+-      ...(input.use_cases && { use_cases: input.use_cases }),
+-      ...(input.tags && { tags: input.tags }),
+-      ...(input.url && { url: assertNotebookLmUrl(input.url) }),
+-    };
+-
+-    this.saveLibrary(updated);
+-    log.success(`✅ Notebook updated: ${input.id}`);
+-
+-    return updated.notebooks[index];
++  async updateNotebook(input: UpdateNotebookInput): Promise<NotebookEntry> {
++    this.assertMutationInput(input);
++    const validatedUrl = input.url ? assertNotebookLmUrl(input.url) : undefined;
++    return this.mutate((updated) => {
++      const index = updated.notebooks.findIndex((entry) => entry.id === input.id);
++      if (index === -1) throw new Error(`Notebook not found: ${input.id}`);
++      const notebook = updated.notebooks[index];
++      updated.notebooks[index] = {
++        ...notebook,
++        ...(input.name && { name: input.name }),
++        ...(input.description && { description: input.description }),
++        ...(input.topics && { topics: [...input.topics] }),
++        ...(input.content_types && { content_types: [...input.content_types] }),
++        ...(input.use_cases && { use_cases: [...input.use_cases] }),
++        ...(input.tags && { tags: [...input.tags] }),
++        ...(validatedUrl && { url: validatedUrl }),
++      };
++      return cloneEntry(updated.notebooks[index]);
++    });
+   }
+ 
+-  /**
+-   * Remove notebook from library
+-   */
+-  removeNotebook(id: string): boolean {
+-    const notebook = this.getNotebook(id);
+-    if (!notebook) {
+-      return false;
+-    }
+-
+-    log.info(`🗑️  Removing notebook: ${id}`);
+-
+-    const updated = { ...this.library };
+-    updated.notebooks = updated.notebooks.filter((n) => n.id !== id);
+-
+-    // If we removed the active notebook, select another one
+-    if (updated.active_notebook_id === id) {
+-      updated.active_notebook_id = updated.notebooks.length > 0 ? updated.notebooks[0].id : null;
+-    }
+-
+-    this.saveLibrary(updated);
+-    log.success(`✅ Notebook removed: ${id}`);
+-
+-    return true;
++  async removeNotebook(id: string): Promise<boolean> {
++    return this.mutate((updated) => {
++      if (!updated.notebooks.some((entry) => entry.id === id)) return false;
++      updated.notebooks = updated.notebooks.filter((entry) => entry.id !== id);
++      if (updated.active_notebook_id === id)
++        updated.active_notebook_id = updated.notebooks[0]?.id ?? null;
++      return true;
++    });
+   }
+ 
+-  /**
+-   * Increment use count for a notebook
+-   */
+-  incrementUseCount(id: string): NotebookEntry | null {
+-    const notebookIndex = this.library.notebooks.findIndex((n) => n.id === id);
+-    if (notebookIndex === -1) {
+-      return null;
+-    }
+-
+-    const notebook = this.library.notebooks[notebookIndex];
+-    const updated = { ...this.library };
+-    const updatedNotebook: NotebookEntry = {
+-      ...notebook,
+-      use_count: notebook.use_count + 1,
+-      last_used: new Date().toISOString(),
+-    };
+-
+-    updated.notebooks[notebookIndex] = updatedNotebook;
+-    this.saveLibrary(updated);
+-
+-    return updatedNotebook;
++  async incrementUseCount(id: string): Promise<NotebookEntry | null> {
++    this.assertBoundedString(id, "id");
++    return this.mutate((updated) => {
++      const index = updated.notebooks.findIndex((entry) => entry.id === id);
++      if (index === -1) return null;
++      if (updated.notebooks[index].use_count >= Number.MAX_SAFE_INTEGER)
++        throw new Error("use_count cannot be incremented beyond MAX_SAFE_INTEGER");
++      updated.notebooks[index] = {
++        ...updated.notebooks[index],
++        use_count: updated.notebooks[index].use_count + 1,
++        last_used: new Date().toISOString(),
++      };
++      return cloneEntry(updated.notebooks[index]);
++    });
+   }
+ 
+-  /**
+-   * Get library statistics
+-   */
+-  getStats(): LibraryStats {
+-    const totalQueries = this.library.notebooks.reduce((sum, n) => sum + n.use_count, 0);
+-
++  async getStats(): Promise<LibraryStats> {
++    await this.refreshFromDisk();
++    const totalQueries = this.library.notebooks.reduce((sum, entry) => sum + entry.use_count, 0);
+     const mostUsed = this.library.notebooks.reduce(
+-      (max, n) => (n.use_count > (max?.use_count || 0) ? n : max),
++      (max, entry) => (entry.use_count > (max?.use_count || 0) ? entry : max),
+       null as NotebookEntry | null
+     );
+-
+     return {
+       total_notebooks: this.library.notebooks.length,
+       active_notebook: this.library.active_notebook_id,
+@@ -326,17 +683,77 @@ export class NotebookLibrary {
+     };
+   }
+ 
+-  /**
+-   * Search notebooks by query (searches name, description, topics)
+-   */
+-  searchNotebooks(query: string): NotebookEntry[] {
++  async getMetadata(): Promise<LibraryMetadata> {
++    await this.refreshFromDisk();
++    let stale: boolean;
++    let mtimeMs = this.loadedMtimeMs;
++    try {
++      mtimeMs = fs.statSync(this.libraryPath).mtimeMs;
++      stale = mtimeMs !== this.loadedMtimeMs;
++    } catch {
++      stale = true;
++    }
++    const externalChangeDetected = this.lastRefreshDetectedExternalChange;
++    this.lastRefreshDetectedExternalChange = false;
++    return {
++      revision: this.library.revision ?? 0,
++      mtime_ms: mtimeMs,
++      loaded_at: this.loadedAt,
++      stale,
++      external_change_detected: externalChangeDetected,
++    };
++  }
++
++  async searchNotebooks(query: string): Promise<NotebookEntry[]> {
++    this.assertBoundedString(query, "search query");
++    await this.refreshFromDisk();
+     const lowerQuery = query.toLowerCase();
+-    return this.library.notebooks.filter(
+-      (n) =>
+-        n.name.toLowerCase().includes(lowerQuery) ||
+-        n.description.toLowerCase().includes(lowerQuery) ||
+-        n.topics.some((t) => t.toLowerCase().includes(lowerQuery)) ||
+-        n.tags?.some((t) => t.toLowerCase().includes(lowerQuery))
+-    );
++    return this.library.notebooks
++      .filter(
++        (entry) =>
++          entry.name.toLowerCase().includes(lowerQuery) ||
++          entry.description.toLowerCase().includes(lowerQuery) ||
++          entry.topics.some((topic) => topic.toLowerCase().includes(lowerQuery)) ||
++          entry.tags?.some((tag) => tag.toLowerCase().includes(lowerQuery))
++      )
++      .map(cloneEntry);
++  }
++
++  private assertBoundedString(value: string, label: string): void {
++    if (Buffer.byteLength(value, "utf-8") > MAX_STRING_BYTES)
++      throw new Error(`${label} exceeds ${MAX_STRING_BYTES} bytes`);
++  }
++
++  private assertBoundedStringArray(value: string[], label: string): void {
++    if (value.length > MAX_ARRAY_ITEMS)
++      throw new Error(`${label} exceeds ${MAX_ARRAY_ITEMS} items`);
++    for (const [index, item] of value.entries())
++      this.assertBoundedString(item, `${label}[${index}]`);
++  }
++
++  private assertMutationInput(input: AddNotebookInput | UpdateNotebookInput): void {
++    const update = "id" in input;
++    const requiredScalars = update ? (["id"] as const) : (["url", "name", "description"] as const);
++    for (const key of requiredScalars) {
++      const value = input[key as keyof typeof input];
++      if (typeof value !== "string") throw new Error(`${key} must be a string`);
++      this.assertBoundedString(value, key);
++    }
++    for (const key of ["url", "name", "description"] as const) {
++      const value = input[key as keyof typeof input];
++      if (value !== undefined) {
++        if (typeof value !== "string") throw new Error(`${key} must be a string`);
++        this.assertBoundedString(value, key);
++      }
++    }
++    for (const key of ["topics", "content_types", "use_cases", "tags"] as const) {
++      const value = input[key as keyof typeof input];
++      if (value !== undefined) {
++        if (!Array.isArray(value) || !value.every((item) => typeof item === "string"))
++          throw new Error(`${key} must be a string array`);
++        this.assertBoundedStringArray(value, key);
++      }
++    }
++    if (!update && !Array.isArray(input.topics)) throw new Error("topics must be a string array");
+   }
+ }
+diff --git a/src/library/types.ts b/src/library/types.ts
+index c775176..2924d41 100755
+--- a/src/library/types.ts
++++ b/src/library/types.ts
+@@ -37,6 +37,7 @@ export interface Library {
+   active_notebook_id: string | null; // Currently selected notebook
+   last_modified: string; // ISO timestamp of last modification
+   version: string; // Library format version (for future migrations)
++  revision?: number; // Monotonic cross-process revision (legacy files default to 0)
+ }
+ 
+ /**
+diff --git a/src/notebooklm/selectors.ts b/src/notebooklm/selectors.ts
+index 31e43ca..633b724 100644
+--- a/src/notebooklm/selectors.ts
++++ b/src/notebooklm/selectors.ts
+@@ -28,6 +28,29 @@
+  */
+ 
+ export const Selectors = {
++  home: {
++    /**
++     * NotebookLM home-page control for creating a notebook.  Keep this
++     * separate from the source-dialog "add" controls: clicking a generic
++     * add button after navigation could otherwise mutate an existing page.
++     */
++    createNotebook: [
++      "button.create-new-button",
++      'button[aria-label="ノートブックを新規作成"]',
++      "button.create-notebook-button",
++      'button[data-testid="create-notebook"]',
++      'button[aria-label*="new notebook" i]',
++      'button[aria-label*="create notebook" i]',
++      'button[aria-label*="neues notizbuch" i]',
++      'button[aria-label*="nouveau notebook" i]',
++      'button[aria-label*="nuevo cuaderno" i]',
++      'button[aria-label*="新しいノートブック" i]',
++      'button:has(mat-icon:text-is("add")):has-text("Notebook")',
++      'button:has(mat-icon:text-is("add")):has-text("Notizbuch")',
++      'button:has(mat-icon:text-is("add")):has-text("ノートブック")',
++    ],
++  },
++
+   chat: {
+     answerContainer: ".to-user-container",
+     answerText: ".to-user-container .message-text-content",
+diff --git a/src/notebooklm/source-readiness.ts b/src/notebooklm/source-readiness.ts
+index 0fee8b0..8b9e01d 100644
+--- a/src/notebooklm/source-readiness.ts
++++ b/src/notebooklm/source-readiness.ts
+@@ -155,7 +155,10 @@ export async function waitForSourceReady(
+   } = {}
+ ): Promise<SourceReadinessResult> {
+   const names = validateNames(options.sourceNames);
+-  const timeoutMs = Math.max(1, Math.min(options.timeoutMs ?? 90_000, 10 * 60_000));
++  const requestedTimeout = options.timeoutMs ?? 90_000;
++  if (requestedTimeout === 0)
++    return inspectSourceReadiness(page, { ...options, sourceNames: names });
++  const timeoutMs = Math.max(1, Math.min(requestedTimeout, 10 * 60_000));
+   const pollIntervalMs = Math.max(50, Math.min(options.pollIntervalMs ?? 1_000, 30_000));
+   const stablePolls = Math.max(1, Math.min(options.stablePolls ?? 2, 20));
+   const started = Date.now();
+diff --git a/src/resources/resource-handlers.ts b/src/resources/resource-handlers.ts
+index e02839b..df75aed 100755
+--- a/src/resources/resource-handlers.ts
++++ b/src/resources/resource-handlers.ts
+@@ -26,7 +26,7 @@ export class ResourceHandlers {
+     server.setRequestHandler(ListResourcesRequestSchema, async () => {
+       log.info("📚 [MCP] list_resources request received");
+ 
+-      const notebooks = this.library.listNotebooks();
++      const notebooks = await this.library.listNotebooks();
+       type ResourceDescriptor = {
+         uri: string;
+         name: string;
+@@ -60,7 +60,7 @@ export class ResourceHandlers {
+       }
+ 
+       // Add legacy metadata resource for backwards compatibility
+-      const active = this.library.getActiveNotebook();
++      const active = await this.library.getActiveNotebook();
+       if (active) {
+         resources.push({
+           uri: "notebooklm://metadata",
+@@ -102,9 +102,9 @@ export class ResourceHandlers {
+ 
+       // Handle library resource
+       if (uri === "notebooklm://library") {
+-        const notebooks = this.library.listNotebooks();
+-        const stats = this.library.getStats();
+-        const active = this.library.getActiveNotebook();
++        const notebooks = await this.library.listNotebooks();
++        const stats = await this.library.getStats();
++        const active = await this.library.getActiveNotebook();
+ 
+         const libraryData = {
+           active_notebook: active
+@@ -162,7 +162,7 @@ export class ResourceHandlers {
+           );
+         }
+ 
+-        const notebook = this.library.getNotebook(id);
++        const notebook = await this.library.getNotebook(id);
+ 
+         if (!notebook) {
+           throw new Error(`Notebook not found: ${id}`);
+@@ -181,7 +181,7 @@ export class ResourceHandlers {
+ 
+       // Legacy metadata resource (backwards compatibility)
+       if (uri === "notebooklm://metadata") {
+-        const active = this.library.getActiveNotebook();
++        const active = await this.library.getActiveNotebook();
+ 
+         if (!active) {
+           throw new Error("No active notebook. Use notebooklm://library to see all notebooks.");
+@@ -228,7 +228,7 @@ export class ResourceHandlers {
+           // template branch carries `uri`. Narrow then resolve.
+           const uri = ref.uri;
+           if (uri === "notebooklm://library/{id}" && argument.name === "id") {
+-            const values = this.completeNotebookIds(argument.value);
++            const values = await this.completeNotebookIds(argument.value);
+             return this.buildCompletion(values);
+           }
+         }
+@@ -242,10 +242,9 @@ export class ResourceHandlers {
+   /**
+    * Return notebook IDs matching the provided input (case-insensitive contains)
+    */
+-  private completeNotebookIds(input: unknown): string[] {
++  private async completeNotebookIds(input: unknown): Promise<string[]> {
+     const query = String(input ?? "").toLowerCase();
+-    return this.library
+-      .listNotebooks()
++    return (await this.library.listNotebooks())
+       .map((nb) => nb.id)
+       .filter((id) => id.toLowerCase().includes(query))
+       .slice(0, 50);
+diff --git a/src/session/session-manager.ts b/src/session/session-manager.ts
+index b024e5a..927cf8d 100755
+--- a/src/session/session-manager.ts
++++ b/src/session/session-manager.ts
+@@ -18,6 +18,7 @@ import { SharedContextManager } from "./shared-context-manager.js";
+ import { CONFIG } from "../config.js";
+ import { log } from "../utils/logger.js";
+ import type { SessionInfo } from "../types.js";
++import type { Page } from "patchright";
+ import { randomBytes } from "crypto";
+ import { assertNotebookLmUrl } from "../notebooklm/notebook-url.js";
+ 
+@@ -132,20 +133,109 @@ export class SessionManager {
+     }
+   }
+ 
+-  private async withLifecycleLock<T>(operation: () => Promise<T>): Promise<T> {
++  /**
++   * Run a short, non-session browser operation in the same persistent
++   * Patchright context used by every notebook session.  The lifecycle lock
++   * prevents context teardown or visibility-mode replacement mid-operation.
++   */
++  async withSharedBrowserPage<T>(
++    operation: (page: Page) => Promise<T>,
++    overrideHeadless?: boolean,
++    deadline?: number,
++    signal?: AbortSignal
++  ): Promise<T> {
++    return this.withLifecycleLock(async () => {
++      this.assertBeforeDeadline(deadline);
++      if (signal?.aborted) throw new Error("browser_operation_deadline_exceeded");
++      if (
++        overrideHeadless !== undefined &&
++        this.sharedContextManager.needsHeadlessModeChange(overrideHeadless)
++      ) {
++        if (this.sessions.size > 0)
++          throw new Error(
++            "Cannot change browser visibility while sessions are active. Close active sessions first."
++          );
++        await this.closeAllSessionsUnlocked();
++        this.assertBeforeDeadline(deadline);
++      }
++      const context = await this.sharedContextManager.getOrCreateContext(
++        overrideHeadless,
++        deadline
++      );
++      this.assertBeforeDeadline(deadline);
++      if (signal?.aborted) throw new Error("browser_operation_deadline_exceeded");
++      const page = await context.newPage();
++      const abortPage = () => {
++        void page.close().catch(() => undefined);
++      };
++      signal?.addEventListener("abort", abortPage, { once: true });
++      try {
++        this.assertBeforeDeadline(deadline);
++        if (signal?.aborted) throw new Error("browser_operation_deadline_exceeded");
++        return await operation(page);
++      } finally {
++        signal?.removeEventListener("abort", abortPage);
++        await page.close().catch(() => undefined);
++      }
++    }, deadline);
++  }
++
++  /**
++   * The queue wait is deadline-aware. A request that expires while queued
++   * releases its own queue slot and never executes later against the browser.
++   */
++  private async withLifecycleLock<T>(operation: () => Promise<T>, deadline?: number): Promise<T> {
+     const previous = this.lifecycleTail;
+     let release!: () => void;
+     this.lifecycleTail = new Promise<void>((resolve) => {
+       release = resolve;
+     });
+-    await previous;
++    let queueTurnReached = false;
+     try {
++      await this.waitForQueueTurn(previous, deadline);
++      queueTurnReached = true;
++    } catch (error) {
++      // An expired waiter never executes, but it must retain its FIFO slot
++      // until the previous owner completes or a later request could overlap it.
++      if (queueTurnReached) release();
++      else void previous.then(release, release);
++      throw error;
++    }
++    try {
++      this.assertBeforeDeadline(deadline);
+       return await operation();
+     } finally {
+       release();
+     }
+   }
+ 
++  private assertBeforeDeadline(deadline?: number): void {
++    if (deadline !== undefined && Date.now() >= deadline)
++      throw new Error("browser_operation_deadline_exceeded");
++  }
++
++  private async waitForQueueTurn(previous: Promise<void>, deadline?: number): Promise<void> {
++    if (deadline === undefined) {
++      await previous;
++      return;
++    }
++    this.assertBeforeDeadline(deadline);
++    let timer: NodeJS.Timeout | undefined;
++    try {
++      await Promise.race([
++        previous,
++        new Promise<void>((_resolve, reject) => {
++          timer = setTimeout(
++            () => reject(new Error("browser_operation_deadline_exceeded")),
++            Math.max(1, deadline - Date.now())
++          );
++        }),
++      ]);
++    } finally {
++      if (timer) clearTimeout(timer);
++    }
++  }
++
+   private async createOrReuseSession(
+     sessionId: string,
+     targetUrl: string,
+diff --git a/src/session/shared-context-manager.ts b/src/session/shared-context-manager.ts
+index 83201dc..f0582c5 100755
+--- a/src/session/shared-context-manager.ts
++++ b/src/session/shared-context-manager.ts
+@@ -30,6 +30,10 @@ import type { BaseProfileLeaseHandle } from "../auth/auth-persistence.js";
+ 
+ export type ProfileModeDecision = "base" | "isolated" | "busy";
+ 
++export interface SharedContextManagerOptions {
++  launchPersistentContext?: typeof chromium.launchPersistentContext;
++}
++
+ /** Pure policy used by runtime and deterministic strategy tests. */
+ export function decideProfileMode(
+   strategy: "auto" | "single" | "isolated",
+@@ -77,9 +81,12 @@ export class SharedContextManager {
+         promise: Promise<void>;
+       }
+     | undefined;
++  private launchPersistentContext: typeof chromium.launchPersistentContext;
+ 
+-  constructor(authManager: AuthManager) {
++  constructor(authManager: AuthManager, options: SharedContextManagerOptions = {}) {
+     this.authManager = authManager;
++    this.launchPersistentContext =
++      options.launchPersistentContext ?? chromium.launchPersistentContext.bind(chromium);
+ 
+     log.info("🌐 SharedContextManager initialized (PERSISTENT MODE)");
+     log.info(`  Chrome Profile: ${CONFIG.chromeProfileDir}`);
+@@ -103,18 +110,21 @@ export class SharedContextManager {
+    *
+    * @param overrideHeadless Optional override for headless mode (true = show browser)
+    */
+-  async getOrCreateContext(overrideHeadless?: boolean): Promise<BrowserContext> {
+-    await this.awaitTeardown();
++  async getOrCreateContext(overrideHeadless?: boolean, deadline?: number): Promise<BrowserContext> {
++    this.assertBeforeDeadline(deadline);
++    await this.awaitBeforeDeadline(this.awaitTeardown(), deadline);
++    this.assertBeforeDeadline(deadline);
+     // Check if headless mode needs to be changed (e.g., show_browser=true)
+     // If yes, close the browser so it gets recreated with the new mode
+     if (this.needsHeadlessModeChange(overrideHeadless)) {
+       log.warning("🔄 Headless mode change detected - recreating browser context...");
+-      await this.closeContext();
++      await this.awaitBeforeDeadline(this.closeContext(), deadline);
++      this.assertBeforeDeadline(deadline);
+     }
+ 
+-    if (await this.needsRecreation()) {
++    if (await this.awaitBeforeDeadline(this.needsRecreation(), deadline)) {
+       log.warning("🔄 Creating/Loading persistent context...");
+-      await this.recreateContext(overrideHeadless);
++      await this.recreateContext(overrideHeadless, deadline);
+     } else {
+       log.success("♻️  Reusing existing persistent context");
+     }
+@@ -162,141 +172,237 @@ export class SharedContextManager {
+    *
+    * @param overrideHeadless Optional override for headless mode (true = show browser)
+    */
+-  private async recreateContext(overrideHeadless?: boolean): Promise<void> {
+-    await this.closeContext();
++  private async recreateContext(overrideHeadless?: boolean, deadline?: number): Promise<void> {
++    this.assertBeforeDeadline(deadline);
++    await this.awaitBeforeDeadline(this.closeContext(), deadline);
++    this.assertBeforeDeadline(deadline);
+ 
+-    const initialLease =
++    const leaseAcquisition =
+       CONFIG.profileStrategy === "isolated"
+-        ? null
+-        : await this.authManager.acquireBaseProfileLease("runtime");
+-    // The base persistent profile is the sole live source of truth.  A
+-    // storage snapshot can only bootstrap a disposable isolated context.
+-    const statePath = await this.authManager.getValidStatePath();
++        ? Promise.resolve(null)
++        : this.authManager.acquireBaseProfileLease("runtime");
++    const initialLease = await this.awaitBeforeDeadline(
++      leaseAcquisition,
++      deadline,
++      async (lateLease) => {
++        await lateLease?.release();
++      }
++    );
++    let leaseTransferred = false;
++    let leaseReleased = false;
++    let contextReady = false;
++    const releaseInitialLease = async () => {
++      if (!initialLease || leaseTransferred || leaseReleased) return;
++      leaseReleased = true;
++      await initialLease.release();
++    };
++    try {
++      this.assertBeforeDeadline(deadline);
++      // The base persistent profile is the sole live source of truth.  A
++      // storage snapshot can only bootstrap a disposable isolated context.
++      const statePath = await this.awaitBeforeDeadline(
++        this.authManager.getValidStatePath(),
++        deadline
++      );
++      this.assertBeforeDeadline(deadline);
+ 
+-    // Determine headless mode: use override if provided, otherwise use CONFIG
+-    const shouldBeHeadless = overrideHeadless !== undefined ? !overrideHeadless : CONFIG.headless;
++      // Determine headless mode: use override if provided, otherwise use CONFIG
++      const shouldBeHeadless = overrideHeadless !== undefined ? !overrideHeadless : CONFIG.headless;
+ 
+-    if (overrideHeadless !== undefined) {
+-      log.info(`  Browser visibility override: ${overrideHeadless ? "VISIBLE" : "HEADLESS"}`);
+-    }
++      if (overrideHeadless !== undefined) {
++        log.info(`  Browser visibility override: ${overrideHeadless ? "VISIBLE" : "HEADLESS"}`);
++      }
+ 
+-    // Build launch options for persistent context
+-    // NOTE: userDataDir is passed as first parameter, NOT in options!
+-    const baseLaunchOptions = {
+-      headless: shouldBeHeadless,
+-      viewport: CONFIG.viewport,
+-      locale: "en-US",
+-      timezoneId: "Europe/Berlin",
+-      // The authoritative base profile is launched without storageState.
+-      // Only a fresh isolated profile receives the recovery snapshot below.
+-      args: [
+-        "--disable-blink-features=AutomationControlled",
+-        "--disable-dev-shm-usage",
+-        "--no-first-run",
+-        "--no-default-browser-check",
+-      ],
+-    };
++      // Build launch options for persistent context
++      // NOTE: userDataDir is passed as first parameter, NOT in options!
++      const baseLaunchOptions = {
++        headless: shouldBeHeadless,
++        timeout: this.remainingLaunchTimeout(deadline),
++        viewport: CONFIG.viewport,
++        locale: "en-US",
++        timezoneId: "Europe/Berlin",
++        // The authoritative base profile is launched without storageState.
++        // Only a fresh isolated profile receives the recovery snapshot below.
++        args: [
++          "--disable-blink-features=AutomationControlled",
++          "--disable-dev-shm-usage",
++          "--no-first-run",
++          "--no-default-browser-check",
++        ],
++      };
+ 
+-    // 🔥 CRITICAL: launchPersistentContext creates/loads Chrome profile
+-    // Strategy handling for concurrent instances + channel fallback
+-    // (issue #13 macOS Tahoe Chrome crash, issue #19 Windows exit code 21).
+-    // We start with the user-preferred channel (default `chrome`) and, on a
+-    // recognised channel-failure, retry with bundled `chromium`.
+-    const baseProfile = CONFIG.chromeProfileDir;
+-    const strategy = CONFIG.profileStrategy;
+-    const preferred = getPreferredChannel();
+-    const tryLaunch = async (userDataDir: string) => {
+-      log.info("  🚀 Launching persistent Chrome context...");
+-      log.dim(`  📍 Profile location: ${userDataDir}`);
+-      if (userDataDir !== baseProfile && statePath)
+-        log.info("  📄 Bootstrapping isolated profile from recovery snapshot");
+-      try {
+-        return await chromium.launchPersistentContext(
+-          userDataDir,
+-          withChannel(
+-            {
+-              ...baseLaunchOptions,
+-              ...(userDataDir !== baseProfile && statePath ? { storageState: statePath } : {}),
+-            },
+-            preferred
+-          )
+-        );
+-      } catch (err) {
+-        if (isProfileLockError(err)) throw err;
+-        if (preferred === "chrome" && isChannelFailure(err)) {
+-          log.warning(
+-            "⚠️  System Chrome failed to launch — falling back to bundled Chromium (set BROWSER_CHANNEL=chromium to skip this retry)."
+-          );
+-          return await chromium.launchPersistentContext(
++      // 🔥 CRITICAL: launchPersistentContext creates/loads Chrome profile
++      // Strategy handling for concurrent instances + channel fallback
++      // (issue #13 macOS Tahoe Chrome crash, issue #19 Windows exit code 21).
++      // We start with the user-preferred channel (default `chrome`) and, on a
++      // recognised channel-failure, retry with bundled `chromium`.
++      const baseProfile = CONFIG.chromeProfileDir;
++      const strategy = CONFIG.profileStrategy;
++      const preferred = getPreferredChannel();
++      const tryLaunch = async (userDataDir: string) => {
++        log.info("  🚀 Launching persistent Chrome context...");
++        log.dim(`  📍 Profile location: ${userDataDir}`);
++        if (userDataDir !== baseProfile && statePath)
++          log.info("  📄 Bootstrapping isolated profile from recovery snapshot");
++        try {
++          const launched = await this.launchPersistentContext(
+             userDataDir,
+             withChannel(
+               {
+                 ...baseLaunchOptions,
++                timeout: this.remainingLaunchTimeout(deadline),
+                 ...(userDataDir !== baseProfile && statePath ? { storageState: statePath } : {}),
+               },
+-              "chromium"
++              preferred
+             )
+           );
++          if (deadline !== undefined && Date.now() >= deadline) {
++            await launched.close().catch(() => undefined);
++            throw new Error("browser_operation_deadline_exceeded");
++          }
++          return launched;
++        } catch (err) {
++          if (isProfileLockError(err)) throw err;
++          if (preferred === "chrome" && isChannelFailure(err)) {
++            this.assertBeforeDeadline(deadline);
++            log.warning(
++              "⚠️  System Chrome failed to launch — falling back to bundled Chromium (set BROWSER_CHANNEL=chromium to skip this retry)."
++            );
++            const launched = await this.launchPersistentContext(
++              userDataDir,
++              withChannel(
++                {
++                  ...baseLaunchOptions,
++                  timeout: this.remainingLaunchTimeout(deadline),
++                  ...(userDataDir !== baseProfile && statePath ? { storageState: statePath } : {}),
++                },
++                "chromium"
++              )
++            );
++            if (deadline !== undefined && Date.now() >= deadline) {
++              await launched.close().catch(() => undefined);
++              throw new Error("browser_operation_deadline_exceeded", { cause: err });
++            }
++            return launched;
++          }
++          throw err;
+         }
+-        throw err;
+-      }
+-    };
++      };
+ 
+-    try {
+-      const decision = decideProfileMode(strategy, !!initialLease, !!statePath);
+-      if (decision === "busy")
+-        throw new Error("profile_busy: isolated runtime requires a bootstrap-eligible snapshot");
+-      if (decision === "isolated") {
++      try {
++        const decision = decideProfileMode(strategy, !!initialLease, !!statePath);
++        if (decision === "busy")
++          throw new Error("profile_busy: isolated runtime requires a bootstrap-eligible snapshot");
++        if (decision === "isolated") {
++          this.assertBeforeDeadline(deadline);
++          const isolatedDir = await this.prepareIsolatedProfileDir();
++          this.assertBeforeDeadline(deadline);
++          this.globalContext = await tryLaunch(isolatedDir);
++          this.currentProfileDir = isolatedDir;
++          this.isIsolatedProfile = true;
++        } else {
++          if (!initialLease) throw new Error("profile_busy");
++          // We hold the base lease for the entire context lifetime.
++          this.globalContext = await tryLaunch(baseProfile);
++          this.baseLease = initialLease;
++          const generationLease = initialLease;
++          // The generation id is assigned below. The callback reads it only
++          // after launch has completed and the heartbeat can run.
++          initialLease.onLost(async () => {
++            this.invalidateRuntimeVerification();
++            const generation = this.contextGenerationId;
++            if (this.baseLease === generationLease && generation)
++              await this.teardownGeneration(generation, true);
++          });
++          this.currentProfileDir = baseProfile;
++          this.isIsolatedProfile = false;
++        }
++      } catch (e) {
++        const isSingleton = isProfileLockError(e);
++        if (!isSingleton || strategy === "isolated") {
++          // hard fail
++          throw e;
++        }
++
++        // auto strategy with lock → fall back to isolated instance dir
++        log.warning(
++          "⚠️  Base Chrome profile in use by another process. Falling back to isolated per-instance profile..."
++        );
++        await releaseInitialLease();
++        if (strategy === "single" || !statePath) throw new Error("profile_busy", { cause: e });
++        this.assertBeforeDeadline(deadline);
+         const isolatedDir = await this.prepareIsolatedProfileDir();
++        this.assertBeforeDeadline(deadline);
+         this.globalContext = await tryLaunch(isolatedDir);
+         this.currentProfileDir = isolatedDir;
+         this.isIsolatedProfile = true;
+-      } else {
+-        if (!initialLease) throw new Error("profile_busy");
+-        // We hold the base lease for the entire context lifetime.
+-        this.globalContext = await tryLaunch(baseProfile);
+-        this.baseLease = initialLease;
+-        const generationLease = initialLease;
+-        // The generation id is assigned below. The callback reads it only
+-        // after launch has completed and the heartbeat can run.
+-        initialLease.onLost(async () => {
+-          this.invalidateRuntimeVerification();
+-          const generation = this.contextGenerationId;
+-          if (this.baseLease === generationLease && generation)
+-            await this.teardownGeneration(generation, true);
+-        });
+-        this.currentProfileDir = baseProfile;
+-        this.isIsolatedProfile = false;
+       }
+-    } catch (e) {
+-      const isSingleton = isProfileLockError(e);
+-      if (!isSingleton || strategy === "isolated") {
+-        await initialLease?.release();
+-        // hard fail
+-        throw e;
++      this.contextCreatedAt = Date.now();
++      this.contextGenerationId = randomBytes(16).toString("hex");
++      this.runtimeVerifiedGeneration = null;
++      this.currentHeadlessMode = shouldBeHeadless;
++      this.attachCloseListener(this.globalContext, this.contextGenerationId);
++      contextReady = true;
++      if (this.baseLease === initialLease) leaseTransferred = true;
++
++      log.success("✅ Persistent context ready!");
++      log.dim(`  Context ID: ${this.getContextId()}`);
++      log.dim(`  Chrome Profile: ${CONFIG.chromeProfileDir}`);
++      log.success("  🎯 Fingerprint: PERSISTENT (same across restarts!)");
++    } finally {
++      if (!contextReady && this.globalContext) {
++        const incompleteContext = this.globalContext;
++        this.globalContext = null;
++        this.baseLease = undefined;
++        await incompleteContext.close().catch(() => undefined);
+       }
+-
+-      // auto strategy with lock → fall back to isolated instance dir
+-      log.warning(
+-        "⚠️  Base Chrome profile in use by another process. Falling back to isolated per-instance profile..."
+-      );
+-      await initialLease?.release();
+-      if (strategy === "single" || !statePath) throw new Error("profile_busy", { cause: e });
+-      const isolatedDir = await this.prepareIsolatedProfileDir();
+-      this.globalContext = await tryLaunch(isolatedDir);
+-      this.currentProfileDir = isolatedDir;
+-      this.isIsolatedProfile = true;
++      await releaseInitialLease();
+     }
+-    this.contextCreatedAt = Date.now();
+-    this.contextGenerationId = randomBytes(16).toString("hex");
+-    this.runtimeVerifiedGeneration = null;
+-    this.currentHeadlessMode = shouldBeHeadless;
+-    this.attachCloseListener(this.globalContext, this.contextGenerationId);
++  }
+ 
+-    log.success("✅ Persistent context ready!");
+-    log.dim(`  Context ID: ${this.getContextId()}`);
+-    log.dim(`  Chrome Profile: ${CONFIG.chromeProfileDir}`);
+-    log.success("  🎯 Fingerprint: PERSISTENT (same across restarts!)");
++  private assertBeforeDeadline(deadline?: number): void {
++    if (deadline !== undefined && Date.now() >= deadline)
++      throw new Error("browser_operation_deadline_exceeded");
++  }
++
++  private remainingLaunchTimeout(deadline?: number): number {
++    if (deadline === undefined) return CONFIG.browserTimeout;
++    const remaining = deadline - Date.now();
++    if (remaining <= 0) throw new Error("browser_operation_deadline_exceeded");
++    return Math.max(1, Math.min(CONFIG.browserTimeout, remaining));
++  }
++
++  /**
++   * Bound lifecycle phases without allowing a timed-out request to resume the
++   * workflow later. Optional late cleanup handles a resource produced after
++   * the caller's deadline, such as a base-profile lease.
++   */
++  private async awaitBeforeDeadline<T>(
++    operation: Promise<T>,
++    deadline?: number,
++    onLate?: (value: T) => Promise<void>
++  ): Promise<T> {
++    if (deadline === undefined) return operation;
++    this.assertBeforeDeadline(deadline);
++    let timer: NodeJS.Timeout | undefined;
++    let timedOut = false;
++    try {
++      return await Promise.race([
++        operation,
++        new Promise<T>((_resolve, reject) => {
++          timer = setTimeout(
++            () => {
++              timedOut = true;
++              reject(new Error("browser_operation_deadline_exceeded"));
++            },
++            Math.max(1, deadline - Date.now())
++          );
++        }),
++      ]);
++    } finally {
++      if (timer) clearTimeout(timer);
++      if (timedOut && onLate) void operation.then(onLate).catch(() => undefined);
++    }
+   }
+ 
+   /**
+diff --git a/src/tools/definitions.ts b/src/tools/definitions.ts
+index 69b7be1..ce79049 100755
+--- a/src/tools/definitions.ts
++++ b/src/tools/definitions.ts
+@@ -15,11 +15,12 @@ import { sourceTools } from "./definitions/sources.js";
+ /**
+  * Build Tool Definitions with NotebookLibrary context
+  */
+-export function buildToolDefinitions(library: NotebookLibrary): Tool[] {
+-  // Update the description for ask_question based on the library state
++export function buildToolDefinitions(_library: NotebookLibrary): Tool[] {
++  // Keep this description process-independent. The active notebook is resolved
++  // from the shared on-disk library at call time, not embedded at startup.
+   const dynamicAskQuestionTool = {
+     ...askQuestionTool,
+-    description: buildAskQuestionDescription(library),
++    description: buildAskQuestionDescription(),
+   };
+ 
+   return [
+diff --git a/src/tools/definitions/ask-question.ts b/src/tools/definitions/ask-question.ts
+index fa66f39..e273f6e 100755
+--- a/src/tools/definitions/ask-question.ts
++++ b/src/tools/definitions/ask-question.ts
+@@ -1,24 +1,11 @@
+ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+-import type { NotebookLibrary } from "../../library/notebook-library.js";
+-import { getTopicsLine, getUseCaseBullets } from "../../library/metadata.js";
+ 
+ /**
+  * Build dynamic tool description for ask_question based on active notebook or library
+  */
+-export function buildAskQuestionDescription(library: NotebookLibrary): string {
+-  const active = library.getActiveNotebook();
++export function buildAskQuestionDescription(): string {
+   const bt = "`"; // Backtick helper to avoid template literal issues
+-
+-  if (active) {
+-    // Safe accessors — older library.json files may omit topics/use_cases (issue #33).
+-    const topics = getTopicsLine(active);
+-    const useCases = getUseCaseBullets(active);
+-
+-    return `# Conversational Research Partner (NotebookLM • Gemini 2.5 • Session RAG)
+-
+-**Active Notebook:** ${active.name}
+-**Content:** ${active.description}
+-**Topics:** ${topics}
++  return `# Conversational Research Partner (NotebookLM • Gemini 2.5 • Session RAG)
+ 
+ > Auth tip: If login is required, use the prompt 'notebooklm.auth-setup' and then verify with the 'get_health' tool. If authentication later fails (e.g., expired cookies), use the prompt 'notebooklm.auth-repair'.
+ 
+@@ -27,9 +14,6 @@ export function buildAskQuestionDescription(library: NotebookLibrary): string {
+ - Session-based: each follow-up uses prior context for deeper, more precise answers
+ - Source-cited responses designed to minimize hallucinations
+ 
+-## When To Use
+-${useCases}
+-
+ ## Rules (Important)
+ - Always prefer continuing an existing session for the same task
+ - If you start a new thread, create a new session and keep its session_id
+@@ -92,23 +76,11 @@ A4: [Complete example with full context]
+ ${bt}${bt}${bt}
+     
+ ## Notebook Selection
+-- Default: active notebook (${active.id})
++- Default: the active notebook resolved from the shared library at call time
+ - Or set notebook_id to use a library notebook
+ - Or set notebook_url for ad-hoc notebooks (not in library)
++- If the library is empty, use create_notebook for a new notebook or add_notebook for an existing URL
+ - If ambiguous which notebook fits, ASK the user which to use`;
+-  } else {
+-    return `# Conversational Research Partner (NotebookLM • Gemini 2.5 • Session RAG)
+-
+-## No Active Notebook
+-- Visit https://notebooklm.google to create a notebook and get a share link
+-- Use **add_notebook** to add it to your library (explains how to get the link)
+-- Use **list_notebooks** to show available sources
+-- Use **select_notebook** to set one active
+-
+-> Auth tip: If login is required, use the prompt 'notebooklm.auth-setup' and then verify with the 'get_health' tool. If authentication later fails (e.g., expired cookies), use the prompt 'notebooklm.auth-repair'.
+-
+-Tip: Tell the user you can manage NotebookLM library and ask which notebook to use for the current task.`;
+-  }
+ }
+ 
+ export const askQuestionTool: Tool = {
+diff --git a/src/tools/definitions/notebook-management.ts b/src/tools/definitions/notebook-management.ts
+index 3207f0d..7c213e3 100755
+--- a/src/tools/definitions/notebook-management.ts
++++ b/src/tools/definitions/notebook-management.ts
+@@ -7,6 +7,33 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+  * `instructions` string.
+  */
+ export const notebookManagementTools: Tool[] = [
++  {
++    name: "create_notebook",
++    description:
++      "Create a new empty notebook through the official NotebookLM homepage, " +
++      "register it in the local library, and make it active. This writes to " +
++      "NotebookLM and is intentionally non-idempotent: call only when the user " +
++      "asks to create a notebook. If registration fails after creation, the " +
++      "response includes the orphan NotebookLM URL for recovery.",
++    inputSchema: {
++      type: "object",
++      additionalProperties: false,
++      properties: {
++        name: { type: "string", minLength: 1, maxLength: 120 },
++        description: { type: "string", maxLength: 500 },
++        tags: { type: "array", items: { type: "string", maxLength: 80 }, maxItems: 20 },
++        show_browser: { type: "boolean" },
++        timeout_ms: { type: "integer", minimum: 5000, maximum: 120000 },
++      },
++    },
++    annotations: {
++      title: "Create NotebookLM notebook",
++      readOnlyHint: false,
++      destructiveHint: false,
++      idempotentHint: false,
++      openWorldHint: true,
++    },
++  },
+   {
+     name: "add_notebook",
+     description:
+diff --git a/src/tools/definitions/sources.ts b/src/tools/definitions/sources.ts
+index 955978f..763417f 100644
+--- a/src/tools/definitions/sources.ts
++++ b/src/tools/definitions/sources.ts
+@@ -297,7 +297,8 @@ export const waitForSourceReadyTool: Tool = {
+   name: "wait_for_source_ready",
+   description:
+     "Wait until every named source has positive, stable readiness evidence in the NotebookLM source list. " +
+-    "A timeout, missing source, error state, or zero-row observation is reported as not ready; no readiness is inferred from absence of evidence.",
++    "A timeout, missing source, error state, or zero-row observation is reported as not ready; no readiness is inferred from absence of evidence. " +
++    "Set timeout_ms=0 for the recommended one-shot status check, then poll again later without holding an MCP request open.",
+   inputSchema: {
+     type: "object",
+     properties: {
+@@ -332,9 +333,10 @@ export const waitForSourceReadyTool: Tool = {
+       ...sharedNotebookTargeting,
+       timeout_ms: {
+         type: "integer",
+-        minimum: 1,
++        minimum: 0,
+         maximum: 600000,
+-        description: "Overall readiness wait in milliseconds. Default: 90000.",
++        description:
++          "Overall readiness wait in milliseconds. Default: 90000 for compatibility. Use 0 for a one-shot, resumable polling workflow.",
+       },
+     },
+     required: ["source_names"],
+diff --git a/src/tools/definitions/system.ts b/src/tools/definitions/system.ts
+index bad6bcd..73ce0d5 100755
+--- a/src/tools/definitions/system.ts
++++ b/src/tools/definitions/system.ts
+@@ -18,6 +18,8 @@ export const systemTools: Tool[] = [
+       "  • `active_sessions`, `max_sessions`, `session_timeout` — runtime\n" +
+       "    session stats (timeout in seconds; sessions auto-close after this)\n" +
+       "  • `headless`, `auto_login_enabled`, `stealth_enabled` — config\n" +
++      "  • `instance_id`, `pid`, `started_at`, `server_version` — identify stale long-lived MCP processes\n" +
++      "  • `library_revision`, `library_mtime_ms`, `library_loaded_at`, `library_stale` — shared-library freshness\n" +
+       "Use this first thing in a new conversation. `authenticated=true` means either " +
+       "this process completed a live NotebookLM readiness check or the recovery snapshot " +
+       "contains unexpired persistent-cookie evidence; it is not proof that Google currently " +
+@@ -32,6 +34,36 @@ export const systemTools: Tool[] = [
+       openWorldHint: false,
+     },
+   },
++  {
++    name: "check_auth",
++    description:
++      "Perform a bounded live authentication preflight against NotebookLM using the MCP-managed browser profile. " +
++      "Unlike get_health, this opens a browser context and contacts Google. It returns only a sanitized status: " +
++      "authenticated, unauthenticated, profile_busy, timeout, or error; it never returns cookies, profile paths, page content, or credentials.",
++    inputSchema: {
++      type: "object",
++      properties: {
++        show_browser: {
++          type: "boolean",
++          description: "Show the managed browser during the live check. Default: false.",
++        },
++        timeout_ms: {
++          type: "integer",
++          minimum: 5000,
++          maximum: 60000,
++          description: "Bounded navigation timeout in milliseconds. Default: 15000.",
++        },
++      },
++      additionalProperties: false,
++    },
++    annotations: {
++      title: "Check live Google authentication",
++      readOnlyHint: true,
++      destructiveHint: false,
++      idempotentHint: true,
++      openWorldHint: true,
++    },
++  },
+   {
+     name: "setup_auth",
+     description:
+diff --git a/src/tools/handlers.ts b/src/tools/handlers.ts
+index e0db4bc..443f101 100755
+--- a/src/tools/handlers.ts
++++ b/src/tools/handlers.ts
+@@ -30,6 +30,13 @@ import type { SourceReadinessResult } from "../notebooklm/source-readiness.js";
+ import type { TranscriptResult, WriteReceipt } from "../notebooklm/transcript-export.js";
+ import type { BaseProfileLeaseHandle } from "../auth/auth-persistence.js";
+ import { classifyAuthHealth, type AuthStatus } from "../auth/auth-persistence.js";
++import { createNotebook, type CreateNotebookBrowserResult } from "../notebooklm/create-notebook.js";
++import { randomUUID } from "crypto";
++import { SERVER_NAME, SERVER_VERSION } from "../version.js";
++import { Selectors } from "../notebooklm/selectors.js";
++
++const INSTANCE_ID = randomUUID();
++const INSTANCE_STARTED_AT = new Date().toISOString();
+ 
+ // CONFIG is process-global and the HTTP transport deliberately shares one core
+ // across clients. Calls that need legacy per-call CONFIG overrides must therefore
+@@ -39,14 +46,45 @@ let browserConfigOperationTail: Promise<void> = Promise.resolve();
+ export async function withTemporaryBrowserConfig<T>(
+   browserOptions: BrowserOptions | undefined,
+   showBrowser: boolean | undefined,
+-  operation: () => Promise<T>
++  operation: () => Promise<T>,
++  deadline?: number
+ ): Promise<T> {
+   const previous = browserConfigOperationTail;
+   let release!: () => void;
+   browserConfigOperationTail = new Promise<void>((resolve) => {
+     release = resolve;
+   });
+-  await previous;
++  let queueTimer: NodeJS.Timeout | undefined;
++  let queueTurnReached = false;
++  try {
++    if (deadline === undefined) await previous;
++    else {
++      if (Date.now() >= deadline) throw new Error("browser_config_deadline_exceeded");
++      await Promise.race([
++        previous,
++        new Promise<void>((_resolve, reject) => {
++          queueTimer = setTimeout(
++            () => reject(new Error("browser_config_deadline_exceeded")),
++            Math.max(1, deadline - Date.now())
++          );
++        }),
++      ]);
++    }
++    queueTurnReached = true;
++  } catch (error) {
++    // Preserve FIFO exclusion even when this request expires while queued.
++    // Its operation is skipped, but its queue slot opens only after the
++    // preceding owner has completed.
++    if (queueTurnReached) release();
++    else void previous.then(release, release);
++    throw error;
++  } finally {
++    if (queueTimer) clearTimeout(queueTimer);
++  }
++  if (deadline !== undefined && Date.now() >= deadline) {
++    release();
++    throw new Error("browser_config_deadline_exceeded");
++  }
+ 
+   if (browserOptions === undefined && showBrowser === undefined) {
+     try {
+@@ -59,6 +97,8 @@ export async function withTemporaryBrowserConfig<T>(
+   const originalConfig = { ...CONFIG };
+   Object.assign(CONFIG, applyBrowserOptions(browserOptions, showBrowser));
+   try {
++    if (deadline !== undefined && Date.now() >= deadline)
++      throw new Error("browser_config_deadline_exceeded");
+     return await operation();
+   } finally {
+     Object.assign(CONFIG, originalConfig);
+@@ -90,17 +130,40 @@ export class ToolHandlers {
+   private authManager: AuthManager;
+   private library: NotebookLibrary;
+   private createCleanupManager: () => CleanupManager;
++  private createNotebookInBrowser: (
++    timeoutMs: number | undefined,
++    showBrowser: boolean | undefined,
++    deadline: number
++  ) => Promise<CreateNotebookBrowserResult>;
+ 
+   constructor(
+     sessionManager: SessionManager,
+     authManager: AuthManager,
+     library: NotebookLibrary,
+-    options: { cleanupManagerFactory?: () => CleanupManager } = {}
++    options: {
++      cleanupManagerFactory?: () => CleanupManager;
++      createNotebookInBrowser?: (
++        timeoutMs: number | undefined,
++        showBrowser: boolean | undefined,
++        deadline: number
++      ) => Promise<CreateNotebookBrowserResult>;
++    } = {}
+   ) {
+     this.sessionManager = sessionManager;
+     this.authManager = authManager;
+     this.library = library;
+     this.createCleanupManager = options.cleanupManagerFactory ?? (() => new CleanupManager());
++    this.createNotebookInBrowser =
++      options.createNotebookInBrowser ??
++      ((timeoutMs, showBrowser, deadline) =>
++        this.sessionManager.withSharedBrowserPage(
++          (page) =>
++            createNotebook(page, {
++              timeoutMs: Math.max(1, Math.min(timeoutMs ?? 60_000, deadline - Date.now())),
++            }),
++          showBrowser,
++          deadline
++        ));
+   }
+ 
+   // Small deterministic test doubles from older callers predate the durable
+@@ -162,7 +225,7 @@ export class ToolHandlers {
+       let resolvedNotebookUrl = notebook_url;
+ 
+       if (!resolvedNotebookUrl && notebook_id) {
+-        const notebook = this.library.incrementUseCount(notebook_id);
++        const notebook = await this.library.incrementUseCount(notebook_id);
+         if (!notebook) {
+           throw new Error(`Notebook not found in library: ${notebook_id}`);
+         }
+@@ -170,9 +233,9 @@ export class ToolHandlers {
+         resolvedNotebookUrl = notebook.url;
+         log.info(`  Resolved notebook: ${notebook.name}`);
+       } else if (!resolvedNotebookUrl) {
+-        const active = this.library.getActiveNotebook();
++        const active = await this.library.getActiveNotebook();
+         if (active) {
+-          const notebook = this.library.incrementUseCount(active.id);
++          const notebook = await this.library.incrementUseCount(active.id);
+           if (!notebook) {
+             throw new Error(`Active notebook not found: ${active.id}`);
+           }
+@@ -440,6 +503,17 @@ export class ToolHandlers {
+       headless: boolean;
+       auto_login_enabled: boolean;
+       stealth_enabled: boolean;
++      instance_id: string;
++      pid: number;
++      started_at: string;
++      server_name: string;
++      server_version: string;
++      build_version: string;
++      library_revision: number;
++      library_mtime_ms: number | null;
++      library_loaded_at: string;
++      library_stale: boolean;
++      library_external_change_detected: boolean;
+       troubleshooting_tip?: string;
+     }>
+   > {
+@@ -460,7 +534,9 @@ export class ToolHandlers {
+ 
+       // Resolve current notebook from the library — `CONFIG.notebookUrl` is a
+       // legacy field (v1) that's no longer set in v2's library-driven flow.
+-      const active = this.library.getActiveNotebook();
++      const active = await this.library.getActiveNotebook();
++      const libraryStats = await this.library.getStats();
++      const libraryMetadata = await this.library.getMetadata();
+       const notebookUrl = active?.url || CONFIG.notebookUrl || "not configured";
+ 
+       const result = {
+@@ -471,7 +547,7 @@ export class ToolHandlers {
+         notebook_url: notebookUrl,
+         active_notebook_id: active?.id ?? null,
+         active_notebook_name: active?.name ?? null,
+-        total_notebooks: this.library.getStats().total_notebooks,
++        total_notebooks: libraryStats.total_notebooks,
+         active_sessions: stats.active_sessions,
+         max_sessions: stats.max_sessions,
+         session_timeout: stats.session_timeout,
+@@ -479,6 +555,17 @@ export class ToolHandlers {
+         headless: CONFIG.headless,
+         auto_login_enabled: CONFIG.autoLoginEnabled,
+         stealth_enabled: CONFIG.stealthEnabled,
++        instance_id: INSTANCE_ID,
++        pid: process.pid,
++        started_at: INSTANCE_STARTED_AT,
++        server_name: SERVER_NAME,
++        server_version: SERVER_VERSION,
++        build_version: SERVER_VERSION,
++        library_revision: libraryMetadata.revision,
++        library_mtime_ms: libraryMetadata.mtime_ms,
++        library_loaded_at: libraryMetadata.loaded_at,
++        library_stale: libraryMetadata.stale,
++        library_external_change_detected: libraryMetadata.external_change_detected,
+         // Add troubleshooting tip if not authenticated
+         ...(!authenticated && {
+           troubleshooting_tip:
+@@ -501,6 +588,129 @@ export class ToolHandlers {
+     }
+   }
+ 
++  /**
++   * Bounded live auth preflight. All returned evidence is deliberately
++   * categorical; URLs, page content, cookies and local profile paths are
++   * never exposed to the caller.
++   */
++  async handleCheckAuth(args: { show_browser?: boolean; timeout_ms?: number }): Promise<
++    ToolResult<{
++      status: "authenticated" | "unauthenticated" | "profile_busy" | "timeout" | "error";
++      authenticated: boolean;
++      live: true;
++      checked_at: string;
++    }>
++  > {
++    const timeoutMs = Math.max(5_000, Math.min(args.timeout_ms ?? 15_000, 60_000));
++    const deadline = Date.now() + timeoutMs;
++    const checkedAt = new Date().toISOString();
++    const controller = new AbortController();
++    let timer: NodeJS.Timeout | undefined;
++    try {
++      const work = withTemporaryBrowserConfig(
++        { timeout_ms: timeoutMs },
++        args.show_browser,
++        async () => {
++          const status = await this.sessionManager.withSharedBrowserPage(
++            async (page) => {
++              await page.goto("https://notebooklm.google.com/", {
++                waitUntil: "domcontentloaded",
++                timeout: Math.max(1, deadline - Date.now()),
++              });
++              const current = new URL(page.url());
++              if (
++                current.protocol !== "https:" ||
++                current.port !== "" ||
++                current.username !== "" ||
++                current.password !== "" ||
++                current.hostname === "accounts.google.com" ||
++                current.hostname !== "notebooklm.google.com" ||
++                current.pathname.startsWith("/login")
++              )
++                return "unauthenticated" as const;
++              const evidenceTimeout = Math.max(1, Math.min(2_000, deadline - Date.now()));
++              const homeReady = await page
++                .locator(Selectors.home.createNotebook.join(", "))
++                .first()
++                .isVisible({ timeout: evidenceTimeout })
++                .catch(() => false);
++              if (homeReady) return "authenticated" as const;
++              const chatReady = await page
++                .locator(Selectors.chat.queryInput.join(", "))
++                .first()
++                .isVisible({ timeout: Math.max(1, Math.min(2_000, deadline - Date.now())) })
++                .catch(() => false);
++              if (chatReady) return "authenticated" as const;
++              throw new Error("notebooklm_ready_evidence_missing");
++            },
++            args.show_browser,
++            deadline,
++            controller.signal
++          );
++          return {
++            success: true,
++            data: {
++              status,
++              authenticated: status === "authenticated",
++              live: true as const,
++              checked_at: checkedAt,
++            },
++          };
++        },
++        deadline
++      );
++      const outcome = await Promise.race([
++        work.then(
++          (value) => ({ kind: "result" as const, value }),
++          (error: unknown) => ({ kind: "error" as const, error })
++        ),
++        new Promise<{ kind: "timeout" }>((resolve) => {
++          timer = setTimeout(() => {
++            controller.abort(new Error("auth_check_deadline_exceeded"));
++            resolve({ kind: "timeout" });
++          }, timeoutMs);
++        }),
++      ]);
++      if (outcome.kind === "timeout") {
++        // Keep observing the underlying work. Its queue/config slots remain
++        // held until safe settlement, preventing later browser work from
++        // overlapping a timed-out probe.
++        void work.catch(() => undefined);
++        return {
++          success: true,
++          data: {
++            status: "timeout",
++            authenticated: false,
++            live: true,
++            checked_at: checkedAt,
++          },
++        };
++      }
++      if (outcome.kind === "error") throw outcome.error;
++      return outcome.value;
++    } catch (error) {
++      const message = error instanceof Error ? error.message : String(error);
++      const status = controller.signal.aborted
++        ? "timeout"
++        : message.includes("profile_busy")
++          ? "profile_busy"
++          : /timeout|deadline_exceeded/i.test(message)
++            ? "timeout"
++            : "error";
++      return {
++        success: true,
++        data: {
++          status,
++          authenticated: false,
++          live: true,
++          checked_at: checkedAt,
++        },
++      };
++    } finally {
++      if (timer) clearTimeout(timer);
++    }
++  }
++
+   /**
+    * Handle setup_auth tool
+    *
+@@ -615,7 +825,7 @@ export class ToolHandlers {
+     log.info(`  Name: ${args.name}`);
+ 
+     try {
+-      const notebook = this.library.addNotebook(args);
++      const notebook = await this.library.addNotebook(args);
+       log.success(`✅ [TOOL] add_notebook completed: ${notebook.id}`);
+       return {
+         success: true,
+@@ -631,6 +841,84 @@ export class ToolHandlers {
+     }
+   }
+ 
++  /** Create in NotebookLM first, then persist and activate the local entry. */
++  async handleCreateNotebook(args: {
++    name?: string;
++    description?: string;
++    tags?: string[];
++    show_browser?: boolean;
++    timeout_ms?: number;
++  }): Promise<
++    ToolResult<
++      | { notebook: NotebookEntry; source_modal_closed: boolean }
++      | {
++          notebook_url: string;
++          recovery: "library_registration_failed" | "active_selection_failed";
++          notebook_id?: string;
++        }
++    >
++  > {
++    const now = new Date()
++      .toISOString()
++      .replace("T", " ")
++      .replace(/:\d{2}\.\d{3}Z$/, " UTC");
++    const name = args.name?.trim() || `New Notebook ${now}`;
++    const description =
++      args.description?.trim() || "Empty NotebookLM notebook created by this server.";
++    const timeoutMs = Math.max(5_000, Math.min(args.timeout_ms ?? 60_000, 120_000));
++    const deadline = Date.now() + timeoutMs;
++    try {
++      const created = await this.createNotebookInBrowser(timeoutMs, args.show_browser, deadline);
++      const url = assertNotebookLmUrl(created.url);
++      let notebook: NotebookEntry;
++      try {
++        notebook = await this.library.addNotebook({
++          url,
++          name,
++          description,
++          topics: ["empty notebook"],
++          content_types: ["empty"],
++          use_cases: ["Add NotebookLM sources for a new task"],
++          tags: args.tags ?? [],
++        });
++      } catch (error) {
++        const message = error instanceof Error ? error.message : String(error);
++        return {
++          success: false,
++          data: { notebook_url: url, recovery: "library_registration_failed" },
++          error:
++            `NotebookLM created ${url}, but local library registration failed: ${message}. ` +
++            "The local entry was not committed; recover by calling add_notebook with this URL.",
++        };
++      }
++      try {
++        // addNotebook selects only the first entry; creation must always become active.
++        const active = await this.library.selectNotebook(notebook.id);
++        return {
++          success: true,
++          data: { notebook: active, source_modal_closed: created.sourceModalClosed },
++        };
++      } catch (error) {
++        const message = error instanceof Error ? error.message : String(error);
++        return {
++          success: false,
++          data: {
++            notebook_url: url,
++            recovery: "active_selection_failed",
++            notebook_id: notebook.id,
++          },
++          error:
++            `NotebookLM created ${url} and local registration succeeded, but selecting it failed: ${message}. ` +
++            `Recover by calling select_notebook with id ${notebook.id}; do not call add_notebook again.`,
++        };
++      }
++    } catch (error) {
++      const message = error instanceof Error ? error.message : String(error);
++      log.error(`❌ [TOOL] create_notebook failed: ${message}`);
++      return { success: false, error: message };
++    }
++  }
++
+   /**
+    * Handle list_notebooks tool
+    */
+@@ -638,7 +926,7 @@ export class ToolHandlers {
+     log.info(`🔧 [TOOL] list_notebooks called`);
+ 
+     try {
+-      const notebooks = this.library.listNotebooks();
++      const notebooks = await this.library.listNotebooks();
+       log.success(`✅ [TOOL] list_notebooks completed (${notebooks.length} notebooks)`);
+       return {
+         success: true,
+@@ -662,7 +950,7 @@ export class ToolHandlers {
+     log.info(`  ID: ${args.id}`);
+ 
+     try {
+-      const notebook = this.library.getNotebook(args.id);
++      const notebook = await this.library.getNotebook(args.id);
+       if (!notebook) {
+         log.warning(`⚠️  [TOOL] Notebook not found: ${args.id}`);
+         return {
+@@ -696,7 +984,7 @@ export class ToolHandlers {
+     log.info(`  ID: ${args.id}`);
+ 
+     try {
+-      const notebook = this.library.selectNotebook(args.id);
++      const notebook = await this.library.selectNotebook(args.id);
+       log.success(`✅ [TOOL] select_notebook completed: ${notebook.name}`);
+       return {
+         success: true,
+@@ -722,7 +1010,7 @@ export class ToolHandlers {
+     log.info(`  ID: ${args.id}`);
+ 
+     try {
+-      const notebook = this.library.updateNotebook(args);
++      const notebook = await this.library.updateNotebook(args);
+       log.success(`✅ [TOOL] update_notebook completed: ${notebook.name}`);
+       return {
+         success: true,
+@@ -748,7 +1036,7 @@ export class ToolHandlers {
+     log.info(`  ID: ${args.id}`);
+ 
+     try {
+-      const notebook = this.library.getNotebook(args.id);
++      const notebook = await this.library.getNotebook(args.id);
+       if (!notebook) {
+         log.warning(`⚠️  [TOOL] Notebook not found: ${args.id}`);
+         return {
+@@ -757,7 +1045,7 @@ export class ToolHandlers {
+         };
+       }
+ 
+-      const removed = this.library.removeNotebook(args.id);
++      const removed = await this.library.removeNotebook(args.id);
+       if (removed) {
+         const closedSessions = await this.sessionManager.closeSessionsForNotebook(notebook.url);
+         log.success(`✅ [TOOL] remove_notebook completed`);
+@@ -792,7 +1080,7 @@ export class ToolHandlers {
+     log.info(`  Query: "${args.query}"`);
+ 
+     try {
+-      const notebooks = this.library.searchNotebooks(args.query);
++      const notebooks = await this.library.searchNotebooks(args.query);
+       log.success(`✅ [TOOL] search_notebooks completed (${notebooks.length} results)`);
+       return {
+         success: true,
+@@ -815,7 +1103,7 @@ export class ToolHandlers {
+     log.info(`🔧 [TOOL] get_library_stats called`);
+ 
+     try {
+-      const stats = this.library.getStats();
++      const stats = await this.library.getStats();
+       log.success(`✅ [TOOL] get_library_stats completed`);
+       return {
+         success: true,
+@@ -914,7 +1202,7 @@ export class ToolHandlers {
+       if (notebookUrl && assertNotebookLmUrl(notebookUrl) !== bound)
+         throw new Error("session_id is bound to a different notebook_url");
+       if (notebookId) {
+-        const nb = this.library.getNotebook(notebookId);
++        const nb = await this.library.getNotebook(notebookId);
+         if (!nb) throw new Error(`Notebook not found in library: ${notebookId}`);
+         if (assertNotebookLmUrl(nb.url) !== bound)
+           throw new Error("session_id is bound to a different notebook_id");
+@@ -924,7 +1212,7 @@ export class ToolHandlers {
+     if (notebookUrl) {
+       const direct = assertNotebookLmUrl(notebookUrl);
+       if (notebookId) {
+-        const nb = this.library.getNotebook(notebookId);
++        const nb = await this.library.getNotebook(notebookId);
+         if (!nb) throw new Error(`Notebook not found in library: ${notebookId}`);
+         if (assertNotebookLmUrl(nb.url) !== direct)
+           throw new Error("notebook_id and notebook_url target different notebooks");
+@@ -932,11 +1220,11 @@ export class ToolHandlers {
+       return direct;
+     }
+     if (notebookId) {
+-      const nb = this.library.getNotebook(notebookId);
++      const nb = await this.library.getNotebook(notebookId);
+       if (!nb) throw new Error(`Notebook not found in library: ${notebookId}`);
+       return assertNotebookLmUrl(nb.url);
+     }
+-    const active = this.library.getActiveNotebook();
++    const active = await this.library.getActiveNotebook();
+     return active ? assertNotebookLmUrl(active.url) : undefined;
+   }
+ 
+@@ -1065,7 +1353,15 @@ export class ToolHandlers {
+     notebook_id?: string;
+     notebook_url?: string;
+     show_browser?: boolean;
+-  }): Promise<ToolResult<{ result: SourceReadinessResult; completed: boolean }>> {
++  }): Promise<
++    ToolResult<{
++      result: SourceReadinessResult;
++      completed: boolean;
++      poll_mode: "one_shot" | "blocking";
++      resumable: true;
++      recommended_retry_after_ms: number | null;
++    }>
++  > {
+     return withTemporaryBrowserConfig(undefined, args.show_browser, async () => {
+       try {
+         const url = await this.resolveNotebookUrl(
+@@ -1084,7 +1380,17 @@ export class ToolHandlers {
+           pollIntervalMs: args.poll_interval_ms,
+           stablePolls: args.stable_polls,
+         });
+-        return { success: true, data: { result, completed: result.status === "ready" } };
++        const completed = result.status === "ready";
++        return {
++          success: true,
++          data: {
++            result,
++            completed,
++            poll_mode: args.timeout_ms === 0 ? "one_shot" : "blocking",
++            resumable: true,
++            recommended_retry_after_ms: completed ? null : 30_000,
++          },
++        };
+       } catch (e) {
+         return { success: false, error: e instanceof Error ? e.message : String(e) };
+       }
+diff --git a/src/utils/settings-manager.ts b/src/utils/settings-manager.ts
+index 443e82d..50f1de5 100755
+--- a/src/utils/settings-manager.ts
++++ b/src/utils/settings-manager.ts
+@@ -33,6 +33,7 @@ const PROFILES: Record<ProfileName, string[]> = {
+   minimal: [
+     "ask_question",
+     "get_health",
++    "check_auth",
+     "list_notebooks",
+     "select_notebook",
+     "get_notebook", // Added as it is read-only and useful
+@@ -40,12 +41,14 @@ const PROFILES: Record<ProfileName, string[]> = {
+   standard: [
+     "ask_question",
+     "get_health",
++    "check_auth",
+     "list_notebooks",
+     "select_notebook",
+     "get_notebook",
+     "setup_auth",
+     "list_sessions",
+     "close_session",
++    "create_notebook",
+     "add_notebook",
+     "update_notebook",
+     "search_notebooks",
+diff --git a/src/version.ts b/src/version.ts
+index c9aaae9..f3f09a7 100644
+--- a/src/version.ts
++++ b/src/version.ts
+@@ -1,2 +1,2 @@
+ export const SERVER_NAME = "notebooklm-mcp-audio-custom";
+-export const SERVER_VERSION = "0.0.5";
++export const SERVER_VERSION = "0.0.6-dev.0";
+diff --git a/scripts/test-create-notebook.mjs b/scripts/test-create-notebook.mjs
+new file mode 100644
+index 0000000..9c0b24f
+--- /dev/null
++++ b/scripts/test-create-notebook.mjs
+@@ -0,0 +1,438 @@
++import assert from "node:assert/strict";
++import fs from "node:fs/promises";
++import os from "node:os";
++import path from "node:path";
++import {
++  createNotebook,
++  resolveCreateNotebookTimeout,
++} from "../dist/notebooklm/create-notebook.js";
++import { ToolHandlers } from "../dist/tools/handlers.js";
++import { buildToolDefinitions } from "../dist/tools/definitions.js";
++import { SettingsManager } from "../dist/utils/settings-manager.js";
++import { NotebookLibrary } from "../dist/library/notebook-library.js";
++
++assert.equal(resolveCreateNotebookTimeout(), 60_000);
++assert.throws(() => resolveCreateNotebookTimeout(4_999));
++assert.throws(() => resolveCreateNotebookTimeout(120_001));
++
++const state = {
++  url: "https://notebooklm.google.com/",
++  createClicked: false,
++  sourceModalVisible: false,
++  escapePressed: false,
++};
++const page = {
++  async goto(url) {
++    state.url = url;
++  },
++  url: () => state.url,
++  locator(selector) {
++    // Current authenticated homepage DOM: <button class="create-new-button"
++    // aria-label="ノートブックを新規作成"><mat-icon>add</mat-icon>新規作成</button>.
++    const isCreate = selector.includes("create-new-button");
++    const isDialog = selector === '[role="dialog"]';
++    return {
++      first() {
++        return this;
++      },
++      async isVisible() {
++        return isCreate || (isDialog && state.sourceModalVisible);
++      },
++      async click() {
++        if (!isCreate) throw new Error("unexpected click");
++        state.createClicked = true;
++        state.url = "https://notebooklm.google.com/notebook/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
++        state.sourceModalVisible = true;
++      },
++      locator() {
++        return {
++          async count() {
++            return 1;
++          },
++        };
++      },
++      async waitFor({ state: expected }) {
++        assert.equal(expected, "hidden");
++        assert.equal(state.sourceModalVisible, false);
++      },
++    };
++  },
++  keyboard: {
++    async press(key) {
++      assert.equal(key, "Escape");
++      state.escapePressed = true;
++      state.sourceModalVisible = false;
++    },
++  },
++};
++const created = await createNotebook(page, { timeoutMs: 5_000 });
++assert.equal(state.createClicked, true);
++assert.equal(created.url, "https://notebooklm.google.com/notebook/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
++assert.equal(created.sourceModalClosed, true);
++assert.equal(state.escapePressed, true);
++console.log("create_notebook mocked homepage flow: PASS");
++
++const rebrandState = {
++  url: "https://notebooklm.google.com/",
++  rebrandVisible: true,
++  rebrandDismissed: false,
++  createClicked: false,
++};
++const rebrandPage = {
++  async goto(url) {
++    rebrandState.url = url;
++  },
++  url: () => rebrandState.url,
++  locator(selector) {
++    const isRebrand = selector === "rebrand-education-dialog";
++    const isCreate = selector.includes("create-new-button");
++    return {
++      first() {
++        return this;
++      },
++      async isVisible() {
++        return (isRebrand && rebrandState.rebrandVisible) || (isCreate && !rebrandState.rebrandVisible);
++      },
++      async textContent() {
++        return "NotebookLM は Gemini Notebook になりました。新しい名前の同じサービスです。詳細";
++      },
++      locator(child) {
++        assert.equal(child, "button.dismiss-button");
++        return {
++          first() { return this; },
++          async isVisible() { return rebrandState.rebrandVisible; },
++          async click() {
++            rebrandState.rebrandVisible = false;
++            rebrandState.rebrandDismissed = true;
++          },
++        };
++      },
++      async click() {
++        assert.equal(isCreate, true);
++        rebrandState.createClicked = true;
++        rebrandState.url = "https://notebooklm.google.com/notebook/acacacac-acac-4cac-8cac-acacacacacac";
++      },
++      async waitFor({ state: expected }) {
++        assert.equal(expected, "hidden");
++        assert.equal(rebrandState.rebrandVisible, false);
++      },
++    };
++  },
++  keyboard: { async press() { throw new Error("Escape must not be used"); } },
++};
++await createNotebook(rebrandPage, { timeoutMs: 5_000 });
++assert.equal(rebrandState.rebrandDismissed, true);
++assert.equal(rebrandState.createClicked, true);
++console.log("create_notebook known rebrand dialog dismissal: PASS");
++
++const delayedRebrandState = {
++  url: "https://notebooklm.google.com/",
++  rebrandVisible: false,
++  createChecks: 0,
++  dismissed: false,
++  clicked: false,
++};
++const delayedRebrandPage = {
++  async goto(url) { delayedRebrandState.url = url; },
++  url: () => delayedRebrandState.url,
++  locator(selector) {
++    const isRebrand = selector === "rebrand-education-dialog";
++    const isCreate = selector.includes("create-new-button");
++    return {
++      first() { return this; },
++      async isVisible() {
++        if (isRebrand) return delayedRebrandState.rebrandVisible;
++        if (!isCreate) return false;
++        delayedRebrandState.createChecks += 1;
++        if (delayedRebrandState.createChecks === 1) {
++          delayedRebrandState.rebrandVisible = true;
++          return false;
++        }
++        return !delayedRebrandState.rebrandVisible;
++      },
++      async textContent() { return "NotebookLM は Gemini Notebook になりました。新しい名前の同じサービスです。詳細"; },
++      locator() {
++        return {
++          first() { return this; },
++          async isVisible() { return delayedRebrandState.rebrandVisible; },
++          async click() {
++            delayedRebrandState.rebrandVisible = false;
++            delayedRebrandState.dismissed = true;
++          },
++        };
++      },
++      async click() {
++        delayedRebrandState.clicked = true;
++        delayedRebrandState.url = "https://notebooklm.google.com/notebook/adadadad-adad-4dad-8dad-adadadadadad";
++      },
++      async waitFor() {},
++    };
++  },
++  keyboard: { async press() { throw new Error("Escape must not be used"); } },
++};
++await createNotebook(delayedRebrandPage, { timeoutMs: 5_000 });
++assert.equal(delayedRebrandState.dismissed, true);
++assert.equal(delayedRebrandState.clicked, true);
++console.log("create_notebook delayed rebrand dialog dismissal: PASS");
++
++const interceptionState = {
++  url: "https://notebooklm.google.com/",
++  rebrandVisible: false,
++  clicks: 0,
++  dismissed: false,
++};
++const interceptionPage = {
++  async goto(url) { interceptionState.url = url; },
++  url: () => interceptionState.url,
++  locator(selector) {
++    const isRebrand = selector === "rebrand-education-dialog";
++    const isCreate = selector.includes("create-new-button");
++    return {
++      first() { return this; },
++      async isVisible() { return isRebrand ? interceptionState.rebrandVisible : isCreate; },
++      async textContent() { return "NotebookLM は Gemini Notebook になりました。新しい名前の同じサービスです。詳細"; },
++      locator() {
++        return {
++          first() { return this; },
++          async isVisible() { return interceptionState.rebrandVisible; },
++          async click() {
++            interceptionState.rebrandVisible = false;
++            interceptionState.dismissed = true;
++          },
++        };
++      },
++      async click() {
++        interceptionState.clicks += 1;
++        if (interceptionState.clicks === 1) {
++          interceptionState.rebrandVisible = true;
++          throw new Error("rebrand dialog intercepts pointer events");
++        }
++        interceptionState.url = "https://notebooklm.google.com/notebook/aeaeaeae-aeae-4eae-8eae-aeaeaeaeaeae";
++      },
++      async waitFor() {},
++    };
++  },
++  keyboard: { async press() { throw new Error("Escape must not be used"); } },
++};
++await createNotebook(interceptionPage, { timeoutMs: 5_000 });
++assert.equal(interceptionState.dismissed, true);
++assert.equal(interceptionState.clicks, 2);
++console.log("create_notebook intercepted click rebrand recovery: PASS");
++
++let unknownOverlayCreateClicks = 0;
++const unknownOverlayPage = {
++  async goto() {},
++  url: () => "https://notebooklm.google.com/",
++  locator(selector) {
++    const isCreate = selector.includes("create-new-button");
++    return {
++      first() { return this; },
++      async isVisible() { return selector === '[role="dialog"]' || isCreate; },
++      async click() { if (isCreate) unknownOverlayCreateClicks += 1; },
++    };
++  },
++};
++await assert.rejects(
++  () => createNotebook(unknownOverlayPage, { timeoutMs: 5_000 }),
++  /Unexpected homepage dialog/
++);
++assert.equal(unknownOverlayCreateClicks, 0);
++console.log("create_notebook unknown overlay fail-closed: PASS");
++
++let delayedVisibilityChecks = 0;
++const delayedState = { url: "https://notebooklm.google.com/", clicked: false };
++const delayedPage = {
++  async goto(url) {
++    delayedState.url = url;
++  },
++  url: () => delayedState.url,
++  locator(selector) {
++    const isCreate = selector.includes("create-new-button");
++    return {
++      first() {
++        return this;
++      },
++      async isVisible() {
++        return isCreate && ++delayedVisibilityChecks >= 3;
++      },
++      async click() {
++        delayedState.clicked = true;
++        delayedState.url = "https://notebooklm.google.com/notebook/abababab-abab-4bab-8bab-abababababab";
++      },
++      locator() {
++        return { async count() { return 0; } };
++      },
++      async waitFor() {},
++    };
++  },
++  keyboard: { async press() {} },
++};
++const delayedCreated = await createNotebook(delayedPage, { timeoutMs: 5_000 });
++assert.equal(delayedState.clicked, true);
++assert.ok(delayedVisibilityChecks >= 3);
++assert.match(delayedCreated.url, /abababab-abab-4bab-8bab-abababababab/);
++console.log("create_notebook delayed homepage control: PASS");
++
++const redirectedPage = {
++  async goto() {},
++  url: () => "https://accounts.google.com/signin",
++  locator() {
++    throw new Error("must not inspect controls after redirect");
++  },
++};
++await assert.rejects(
++  () => createNotebook(redirectedPage, { timeoutMs: 5_000 }),
++  /redirected unexpectedly/
++);
++console.log("create_notebook login redirect fail-closed: PASS");
++
++const tools = new Map(buildToolDefinitions({ getActiveNotebook: () => null }).map((tool) => [tool.name, tool]));
++const definition = tools.get("create_notebook");
++assert.ok(definition, "create_notebook is registered");
++assert.equal(definition.annotations.readOnlyHint, false);
++assert.equal(definition.annotations.destructiveHint, false);
++assert.equal(definition.annotations.idempotentHint, false);
++assert.equal(definition.inputSchema.properties.timeout_ms.minimum, 5_000);
++
++const priorProfile = process.env.NOTEBOOKLM_PROFILE;
++process.env.NOTEBOOKLM_PROFILE = "standard";
++try {
++  const filtered = new SettingsManager().filterTools(
++    buildToolDefinitions({ getActiveNotebook: () => null })
++  );
++  assert.ok(filtered.some((tool) => tool.name === "create_notebook"));
++} finally {
++  if (priorProfile === undefined) delete process.env.NOTEBOOKLM_PROFILE;
++  else process.env.NOTEBOOKLM_PROFILE = priorProfile;
++}
++console.log("create_notebook standard profile exposure: PASS");
++
++const entries = [];
++const library = {
++  addNotebook(input) {
++    const entry = { id: `nb-${entries.length + 1}`, ...input };
++    entries.push(entry);
++    return entry;
++  },
++  selectNotebook(id) {
++    return entries.find((entry) => entry.id === id);
++  },
++};
++const handlers = new ToolHandlers({}, {}, library, {
++  createNotebookInBrowser: async () => ({
++    url: "https://notebooklm.google.com/notebook/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
++    sourceModalClosed: true,
++  }),
++});
++const result = await handlers.handleCreateNotebook({ tags: ["new"] });
++assert.equal(result.success, true);
++assert.match(result.data.notebook.name, /^New Notebook /);
++assert.deepEqual(result.data.notebook.tags, ["new"]);
++assert.equal(result.data.source_modal_closed, true);
++console.log("create_notebook handler library registration: PASS");
++
++const failingHandlers = new ToolHandlers({}, {}, { addNotebook() { throw new Error("disk unavailable"); } }, {
++  createNotebookInBrowser: async () => ({
++    url: "https://notebooklm.google.com/notebook/cccccccc-cccc-4ccc-8ccc-cccccccccccc",
++    sourceModalClosed: false,
++  }),
++});
++const orphan = await failingHandlers.handleCreateNotebook({ name: "Recovery" });
++assert.equal(orphan.success, false);
++assert.match(orphan.error, /cccccccc-cccc-4ccc-8ccc-cccccccccccc/);
++assert.match(orphan.error, /add_notebook/);
++assert.equal(orphan.data.recovery, "library_registration_failed");
++assert.match(orphan.data.notebook_url, /cccccccc-cccc-4ccc-8ccc-cccccccccccc/);
++console.log("create_notebook orphan recovery: PASS");
++
++const selectionHandlers = new ToolHandlers(
++  {},
++  {},
++  {
++    addNotebook: () => ({ id: "already-registered" }),
++    selectNotebook() {
++      throw new Error("selection write failed");
++    },
++  },
++  {
++    createNotebookInBrowser: async () => ({
++      url: "https://notebooklm.google.com/notebook/dddddddd-dddd-4ddd-8ddd-dddddddddddd",
++      sourceModalClosed: false,
++    }),
++  }
++);
++const selectionFailure = await selectionHandlers.handleCreateNotebook({ name: "Recovery" });
++assert.equal(selectionFailure.success, false);
++assert.equal(selectionFailure.data.recovery, "active_selection_failed");
++assert.equal(selectionFailure.data.notebook_id, "already-registered");
++assert.match(selectionFailure.error, /select_notebook/);
++assert.match(selectionFailure.error, /do not call add_notebook again/);
++console.log("create_notebook selection recovery: PASS");
++
++const libraryFixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), "notebooklm-library-create-"));
++const writeFailurePath = path.join(libraryFixtureRoot, "write-failure.json");
++const writeSeed = new NotebookLibrary({ libraryPath: writeFailurePath });
++await writeSeed.listNotebooks();
++const writeFailure = new NotebookLibrary({
++  libraryPath: writeFailurePath,
++  writeFile: () => {
++    throw new Error("simulated write failure");
++  },
++});
++await assert.rejects(() =>
++  writeFailure.addNotebook({
++    url: "https://notebooklm.google.com/notebook/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
++    name: "Write failure",
++    description: "test",
++    topics: ["test"],
++  })
++);
++assert.deepEqual(await writeFailure.listNotebooks(), []);
++assert.equal(await writeFailure.getActiveNotebook(), null);
++const existing = {
++  id: "existing",
++  url: "https://notebooklm.google.com/notebook/ffffffff-ffff-4fff-8fff-ffffffffffff",
++  name: "Existing",
++  description: "test",
++  topics: ["test"],
++  content_types: ["test"],
++  use_cases: ["test"],
++  added_at: "before",
++  last_used: "before",
++  use_count: 0,
++  tags: [],
++};
++const selectPath = path.join(libraryFixtureRoot, "select-failure.json");
++const selectSeed = new NotebookLibrary({ libraryPath: selectPath });
++await selectSeed.addNotebook({
++  url: existing.url,
++  name: existing.name,
++  description: existing.description,
++  topics: existing.topics,
++  content_types: existing.content_types,
++  use_cases: existing.use_cases,
++  tags: existing.tags,
++});
++const beforeSelect = await selectSeed.getActiveNotebook();
++const selectWriteFailure = new NotebookLibrary({
++  libraryPath: selectPath,
++  writeFile: () => {
++    throw new Error("simulated write failure");
++  },
++});
++await assert.rejects(() => selectWriteFailure.selectNotebook(beforeSelect.id));
++assert.equal((await selectWriteFailure.getActiveNotebook())?.id, beforeSelect.id);
++assert.equal((await selectWriteFailure.getNotebook(beforeSelect.id)).last_used, beforeSelect.last_used);
++const japaneseName = new NotebookLibrary({
++  libraryPath: path.join(libraryFixtureRoot, "japanese.json"),
++});
++const japanese = await japaneseName.addNotebook({
++  url: "https://notebooklm.google.com/notebook/11111111-1111-4111-8111-111111111111",
++  name: "日本語ノート",
++  description: "test",
++  topics: ["test"],
++});
++assert.equal(japanese.id, "notebook");
++assert.equal((await japaneseName.getActiveNotebook())?.id, "notebook");
++await fs.rm(libraryFixtureRoot, { recursive: true, force: true });
++console.log("library transactional write and Japanese-name ID tests: PASS");
+diff --git a/scripts/test-library-concurrency.mjs b/scripts/test-library-concurrency.mjs
+new file mode 100644
+index 0000000..cdf0733
+--- /dev/null
++++ b/scripts/test-library-concurrency.mjs
+@@ -0,0 +1,216 @@
++#!/usr/bin/env node
++import assert from "node:assert/strict";
++import fs from "node:fs";
++import fsp from "node:fs/promises";
++import os from "node:os";
++import path from "node:path";
++import { spawn } from "node:child_process";
++import { NotebookLibrary } from "../dist/library/notebook-library.js";
++
++const [, , mode, libraryPath, prefix] = process.argv;
++
++if (mode === "--worker") {
++  const library = new NotebookLibrary({ libraryPath });
++  for (let index = 0; index < 12; index += 1) {
++    const entry = await library.addNotebook({
++      url: `https://notebooklm.google.com/notebook/${prefix === "a" ? "aaaaaaaa" : "bbbbbbbb"}-${String(index).padStart(4, "0")}-4000-8000-000000000000`,
++      name: `${prefix}-${index}`,
++      description: "concurrency fixture",
++      topics: ["initial"],
++    });
++    await library.updateNotebook({ id: entry.id, topics: ["updated", prefix] });
++  }
++  process.exit(0);
++}
++
++if (mode === "--heartbeat-holder") {
++  const marker = prefix;
++  const library = new NotebookLibrary({
++    libraryPath,
++    lockStaleMs: 5000,
++    lockUpdateMs: 1000,
++    writeFile: async (target, data) => {
++      await fsp.writeFile(marker, "locked");
++      await new Promise((resolve) => setTimeout(resolve, 7000));
++      await fsp.writeFile(target, data);
++    },
++  });
++  await library.addNotebook({
++    url: "https://notebooklm.google.com/notebook/dddddddd-dddd-4ddd-8ddd-dddddddddddd",
++    name: "heartbeat-holder",
++    description: "heartbeat fixture",
++    topics: ["heartbeat"],
++  });
++  process.exit(0);
++}
++
++if (mode === "--heartbeat-contender") {
++  const library = new NotebookLibrary({
++    libraryPath,
++    lockStaleMs: 5000,
++    lockUpdateMs: 1000,
++  });
++  await library.addNotebook({
++    url: "https://notebooklm.google.com/notebook/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
++    name: "heartbeat-contender",
++    description: "heartbeat fixture",
++    topics: ["heartbeat"],
++  });
++  process.exit(0);
++}
++
++const root = await fsp.mkdtemp(path.join(os.tmpdir(), "notebooklm-library-concurrency-"));
++const sharedPath = path.join(root, "library.json");
++const observer = new NotebookLibrary({ libraryPath: sharedPath });
++assert.deepEqual(await observer.listNotebooks(), []);
++
++const runWorker = (workerPrefix) =>
++  new Promise((resolve, reject) => {
++    const child = spawn(process.execPath, [import.meta.filename, "--worker", sharedPath, workerPrefix], {
++      stdio: ["ignore", "pipe", "pipe"],
++    });
++    let stderr = "";
++    child.stderr.on("data", (chunk) => {
++      stderr += chunk;
++    });
++    child.on("error", reject);
++    child.on("exit", (code) =>
++      code === 0 ? resolve() : reject(new Error(`worker ${workerPrefix} failed (${code}): ${stderr}`))
++    );
++  });
++
++await Promise.all([runWorker("a"), runWorker("b")]);
++const parsed = JSON.parse(await fsp.readFile(sharedPath, "utf-8"));
++assert.equal(parsed.notebooks.length, 24);
++assert.ok(parsed.revision >= 49);
++assert.equal(new Set(parsed.notebooks.map((entry) => entry.id)).size, 24);
++assert.ok(parsed.notebooks.every((entry) => entry.topics[0] === "updated"));
++
++// The instance created before child writes must observe external revisions.
++const refreshed = await observer.listNotebooks();
++assert.equal(refreshed.length, 24);
++const metadata = await observer.getMetadata();
++assert.equal(metadata.revision, parsed.revision);
++assert.equal(metadata.stale, false);
++assert.equal(metadata.external_change_detected, true);
++
++// A failed temp write must preserve the authoritative old file byte-for-byte.
++const beforeFailure = await fsp.readFile(sharedPath);
++const failing = new NotebookLibrary({
++  libraryPath: sharedPath,
++  writeFile: () => {
++    throw new Error("injected temp write failure");
++  },
++});
++await assert.rejects(
++  () =>
++    failing.addNotebook({
++      url: "https://notebooklm.google.com/notebook/cccccccc-cccc-4ccc-8ccc-cccccccccccc",
++      name: "must-not-commit",
++      description: "failure fixture",
++      topics: ["failure"],
++    }),
++  /library_write_failed/
++);
++assert.deepEqual(await fsp.readFile(sharedPath), beforeFailure);
++JSON.parse(await fsp.readFile(sharedPath, "utf-8"));
++
++// Invalid mutation shapes and overflowing counters fail before commit. The
++// authoritative bytes and revision must remain unchanged.
++const mutationGuard = new NotebookLibrary({ libraryPath: sharedPath });
++const mutationBytes = await fsp.readFile(sharedPath);
++const mutationRevision = JSON.parse(mutationBytes).revision;
++await assert.rejects(
++  mutationGuard.addNotebook({
++    url: "https://notebooklm.google.com/notebook/ffffffff-ffff-4fff-8fff-ffffffffffff",
++    name: "invalid-description",
++    description: 42,
++    topics: ["guard"],
++  }),
++  /description must be a string/
++);
++await assert.rejects(
++  mutationGuard.updateNotebook({
++    id: parsed.notebooks[0].id,
++    name: 42,
++  }),
++  /name must be a string/
++);
++assert.deepEqual(await fsp.readFile(sharedPath), mutationBytes);
++assert.equal(JSON.parse(await fsp.readFile(sharedPath, "utf-8")).revision, mutationRevision);
++
++const maxSafePath = path.join(root, "max-safe.json");
++const maxSafeLibrary = {
++  notebooks: [
++    {
++      ...parsed.notebooks[0],
++      id: "max-safe",
++      use_count: Number.MAX_SAFE_INTEGER,
++    },
++  ],
++  active_notebook_id: "max-safe",
++  last_modified: new Date().toISOString(),
++  version: "1.0.0",
++  revision: 1,
++};
++await fsp.writeFile(maxSafePath, JSON.stringify(maxSafeLibrary), { mode: 0o600 });
++const maxSafeBytes = await fsp.readFile(maxSafePath);
++const maxSafe = new NotebookLibrary({ libraryPath: maxSafePath });
++await assert.rejects(
++  maxSafe.incrementUseCount("max-safe"),
++  /MAX_SAFE_INTEGER/
++);
++assert.deepEqual(await fsp.readFile(maxSafePath), maxSafeBytes);
++
++// Invalid JSON is preserved and startup fails closed instead of resetting it.
++const corruptPath = path.join(root, "corrupt.json");
++await fsp.writeFile(corruptPath, "{not-json", { mode: 0o600 });
++let corruptError;
++assert.throws(
++  () => new NotebookLibrary({ libraryPath: corruptPath }),
++  (error) => {
++    corruptError = error;
++    return /library_invalid/.test(error.message);
++  }
++);
++assert.equal(await fsp.readFile(corruptPath, "utf-8"), "{not-json");
++const backups = (await fsp.readdir(root)).filter((name) => name.startsWith("corrupt.json.corrupt-"));
++assert.equal(backups.length, 1);
++assert.match(corruptError.message, new RegExp(`backup=${backups[0].replaceAll(".", "\\.")}`));
++assert.equal(fs.statSync(path.join(root, backups[0])).mode & 0o777, 0o600);
++
++// An active writer awaiting async I/O must keep its proper-lockfile heartbeat;
++// a contender must wait rather than reclaiming the lock as stale.
++const heartbeatPath = path.join(root, "heartbeat.json");
++const heartbeatSeed = new NotebookLibrary({ libraryPath: heartbeatPath });
++await heartbeatSeed.listNotebooks();
++const markerPath = path.join(root, "holder.locked");
++const spawnMode = (workerMode, extra = "") =>
++  spawn(process.execPath, [import.meta.filename, workerMode, heartbeatPath, extra], {
++    stdio: ["ignore", "pipe", "pipe"],
++  });
++const holder = spawnMode("--heartbeat-holder", markerPath);
++for (let attempt = 0; attempt < 100 && !fs.existsSync(markerPath); attempt += 1)
++  await new Promise((resolve) => setTimeout(resolve, 50));
++assert.equal(fs.existsSync(markerPath), true);
++const contender = spawnMode("--heartbeat-contender");
++const waitChild = (child, label) =>
++  new Promise((resolve, reject) => {
++    let stderr = "";
++    child.stderr.on("data", (chunk) => {
++      stderr += chunk;
++    });
++    child.on("error", reject);
++    child.on("exit", (code) =>
++      code === 0 ? resolve() : reject(new Error(`${label} failed (${code}): ${stderr}`))
++    );
++  });
++await Promise.all([waitChild(holder, "holder"), waitChild(contender, "contender")]);
++const heartbeatFinal = JSON.parse(await fsp.readFile(heartbeatPath, "utf-8"));
++assert.deepEqual(
++  new Set(heartbeatFinal.notebooks.map((entry) => entry.name)),
++  new Set(["heartbeat-holder", "heartbeat-contender"])
++);
++
++await fsp.rm(root, { recursive: true, force: true });
++console.log("library cross-process concurrency and durability tests: PASS");
+diff --git a/src/notebooklm/create-notebook.ts b/src/notebooklm/create-notebook.ts
+new file mode 100644
+index 0000000..e1e6699
+--- /dev/null
++++ b/src/notebooklm/create-notebook.ts
+@@ -0,0 +1,191 @@
++import type { Page } from "patchright";
++import { assertNotebookLmUrl } from "./notebook-url.js";
++import { Selectors } from "./selectors.js";
++import { safeSleep } from "../browser/watchdog.js";
++
++const HOME_URL = "https://notebooklm.google.com/";
++const DEFAULT_TIMEOUT_MS = 60_000;
++const MIN_TIMEOUT_MS = 5_000;
++const MAX_TIMEOUT_MS = 120_000;
++
++export interface CreateNotebookBrowserInput {
++  timeoutMs?: number;
++}
++
++export interface CreateNotebookBrowserResult {
++  url: string;
++  sourceModalClosed: boolean;
++}
++
++export function resolveCreateNotebookTimeout(value?: number): number {
++  if (value === undefined) return DEFAULT_TIMEOUT_MS;
++  if (!Number.isInteger(value) || value < MIN_TIMEOUT_MS || value > MAX_TIMEOUT_MS)
++    throw new Error(
++      `timeout_ms must be an integer between ${MIN_TIMEOUT_MS} and ${MAX_TIMEOUT_MS}.`
++    );
++  return value;
++}
++
++/**
++ * Create a notebook only through the official NotebookLM home-page UI.
++ * A successful click is never enough: a strict notebook UUID URL is the
++ * confirmation signal, so login pages, stale home pages, and UI drift fail
++ * closed without returning a target that source tools could bind to.
++ */
++export async function createNotebook(
++  page: Page,
++  input: CreateNotebookBrowserInput = {}
++): Promise<CreateNotebookBrowserResult> {
++  const timeoutMs = resolveCreateNotebookTimeout(input.timeoutMs);
++  const deadline = Date.now() + timeoutMs;
++  await page.goto(HOME_URL, {
++    waitUntil: "domcontentloaded",
++    timeout: remainingMs(deadline),
++  });
++
++  let lastUrl = page.url();
++  assertNotebookLmHomepageUrl(lastUrl);
++  const createButton = page.locator(Selectors.home.createNotebook.join(", ")).first();
++  while (Date.now() < deadline) {
++    lastUrl = page.url();
++    assertNotebookLmHomepageUrl(lastUrl);
++    if (await prepareHomepageForCreate(page, deadline)) continue;
++    // A combined selector gives each poll one bounded visibility probe rather
++    // than multiplying the timeout by every fallback selector.
++    if (
++      await createButton
++        .isVisible({ timeout: Math.min(200, remainingMs(deadline)) })
++        .catch(() => false)
++    ) {
++      try {
++        await createButton.click({ timeout: Math.min(5_000, remainingMs(deadline)) });
++        break;
++      } catch (error) {
++        // A rebrand dialog can mount after the gate but before Patchright
++        // dispatches the click. Re-enter only the verified dialog path; any
++        // other overlay remains fail-closed.
++        if (isOverlayInterception(error) && (await prepareHomepageForCreate(page, deadline)))
++          continue;
++        throw error;
++      }
++    }
++    await safeSleep(page, Math.min(250, remainingMs(deadline)));
++  }
++  if (Date.now() >= deadline && !assertNotebookLmUrlOrNull(page.url()))
++    throw new Error(
++      "NotebookLM create-notebook control did not appear before timeout; UI may have changed."
++    );
++
++  while (Date.now() < deadline) {
++    lastUrl = page.url();
++    try {
++      const url = assertNotebookLmUrl(lastUrl);
++      return { url, sourceModalClosed: await closeInitialSourceModal(page, deadline) };
++    } catch {
++      await safeSleep(page, 250);
++    }
++  }
++  throw new Error("Notebook creation did not reach a valid NotebookLM UUID URL before timeout.");
++}
++
++async function prepareHomepageForCreate(page: Page, deadline: number): Promise<boolean> {
++  const dismissed = await dismissKnownRebrandEducationDialog(page, deadline);
++  await assertNoUnexpectedHomepageDialog(page, deadline);
++  return dismissed;
++}
++
++/**
++ * NotebookLM currently shows this one-time education dialog to authenticated
++ * users. Its component, copy, and dedicated dismiss control are all checked
++ * before interaction; no generic dialog dismissal is permitted.
++ */
++async function dismissKnownRebrandEducationDialog(page: Page, deadline: number): Promise<boolean> {
++  const dialog = page.locator("rebrand-education-dialog").first();
++  if (
++    !(await dialog.isVisible({ timeout: Math.min(250, remainingMs(deadline)) }).catch(() => false))
++  )
++    return false;
++  const text =
++    (await dialog
++      .textContent({ timeout: Math.min(1_000, remainingMs(deadline)) })
++      .catch(() => "")) ?? "";
++  if (!text.includes("NotebookLM") || !text.includes("Gemini Notebook"))
++    throw new Error("Unexpected rebrand education dialog content; refusing to dismiss it.");
++  const dismiss = dialog.locator("button.dismiss-button").first();
++  if (
++    !(await dismiss
++      .isVisible({ timeout: Math.min(1_000, remainingMs(deadline)) })
++      .catch(() => false))
++  )
++    throw new Error("Known rebrand education dialog has no visible dismiss control.");
++  await dismiss.click({ timeout: Math.min(5_000, remainingMs(deadline)) });
++  await dialog.waitFor({ state: "hidden", timeout: Math.min(5_000, remainingMs(deadline)) });
++  return true;
++}
++
++/** A visible dialog other than the verified rebrand dialog must not be bypassed. */
++async function assertNoUnexpectedHomepageDialog(page: Page, deadline: number): Promise<void> {
++  const dialog = page.locator('[role="dialog"]').first();
++  if (await dialog.isVisible({ timeout: Math.min(250, remainingMs(deadline)) }).catch(() => false))
++    throw new Error("Unexpected homepage dialog is visible; refusing to click create_notebook.");
++}
++
++function isOverlayInterception(error: unknown): boolean {
++  const message = error instanceof Error ? error.message : String(error);
++  return /intercept(?:ed|s)?.*(?:pointer|click)|(?:pointer|click).*intercept/i.test(message);
++}
++
++function assertNotebookLmHomepageUrl(value: string): void {
++  let url: URL;
++  try {
++    url = new URL(value);
++  } catch {
++    throw new Error("NotebookLM homepage navigation produced an invalid URL.");
++  }
++  if (
++    url.protocol !== "https:" ||
++    url.hostname !== "notebooklm.google.com" ||
++    url.port !== "" ||
++    url.username !== "" ||
++    url.password !== "" ||
++    url.pathname !== "/"
++  )
++    throw new Error("NotebookLM homepage navigation redirected unexpectedly.");
++}
++
++function assertNotebookLmUrlOrNull(value: string): boolean {
++  try {
++    assertNotebookLmUrl(value);
++    return true;
++  } catch {
++    return false;
++  }
++}
++
++/** Close only the initial source-picker modal, never an arbitrary dialog. */
++async function closeInitialSourceModal(page: Page, deadline: number): Promise<boolean> {
++  const dialog = page.locator(Selectors.sources.overlayPane).first();
++  if (
++    !(await dialog.isVisible({ timeout: Math.min(500, remainingMs(deadline)) }).catch(() => false))
++  )
++    return false;
++  const looksLikeSourceModal = await dialog
++    .locator('input[type="file"], textarea, button.drop-zone-icon-button')
++    .count()
++    .then((count) => count > 0)
++    .catch(() => false);
++  if (!looksLikeSourceModal) return false;
++  await page.keyboard.press("Escape");
++  await dialog
++    .waitFor({ state: "hidden", timeout: Math.min(5_000, remainingMs(deadline)) })
++    .catch(() => undefined);
++  return !(await dialog
++    .isVisible({ timeout: Math.min(250, remainingMs(deadline)) })
++    .catch(() => true));
++}
++
++function remainingMs(deadline: number): number {
++  const remaining = deadline - Date.now();
++  if (remaining <= 0) throw new Error("create_notebook deadline exceeded");
++  return remaining;
++}

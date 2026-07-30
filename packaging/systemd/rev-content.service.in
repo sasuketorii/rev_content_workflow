@@ -1,0 +1,14 @@
+[Unit]
+Description=Run one durable Rev Content workflow step
+
+[Service]
+Type=oneshot
+ExecStart=@REV_CONTENT_BIN@ worker --once
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=-@CONFIG_DIR@
+ReadWritePaths=-@STATE_DIR@
+ReadWritePaths=-@DATA_DIR@
+LockPersonality=true
+RestrictSUIDSGID=true

@@ -1,0 +1,44 @@
+name: Linux external distribution gate
+
+on:
+  workflow_dispatch:
+  pull_request:
+
+jobs:
+  ubuntu-clean-install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22.13.0"
+          cache: npm
+      - name: Install release prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg yt-dlp
+          curl -fsSLo /tmp/gitleaks.tar.gz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.28.0/gitleaks_8.28.0_linux_x64.tar.gz
+          echo "a65b5253807a68ac0cafa4414031fd740aeb55f54fb7e55f386acb52e6a840eb  /tmp/gitleaks.tar.gz" |
+            sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          tar -xzf /tmp/gitleaks.tar.gz -C "$HOME/.local/bin" gitleaks
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Checkout exact dependency fixtures
+        run: |
+          git clone https://github.com/sasuketorii/notebooklm_mcp_with.git /tmp/notebooklm-fixture
+          git -C /tmp/notebooklm-fixture checkout 798513bc08510f257c936d1ddbdd1b935d0c0a0a
+          git clone https://github.com/sasuketorii/revmagic.git /tmp/revmagic-fixture
+          git -C /tmp/revmagic-fixture checkout 7fb1cd0d0992abc676656de0b1a170c888c109e9
+      - name: Unit, restart, deadline, and systemd lifecycle contracts
+        run: |
+          npm ci
+          npm run check
+          ./scripts/test-systemd-contract.sh
+          ./scripts/test-workflow-pins.sh
+      - name: Clean verified fixture install and setup
+        env:
+          REV_CONTENT_TEST_NOTEBOOK_REPO: /tmp/notebooklm-fixture
+          REV_CONTENT_TEST_REVMAGIC_REPO: /tmp/revmagic-fixture
+        run: ./scripts/test-fixture-install.sh

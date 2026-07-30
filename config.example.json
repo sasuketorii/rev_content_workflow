@@ -1,0 +1,31 @@
+{
+  "database": ".runtime/jobs.sqlite",
+  "leaseSeconds": 60,
+  "backoffSeconds": [5, 15, 30, 60, 120, 300],
+  "readiness": {
+    "maxAttempts": 60,
+    "maxElapsedSeconds": 21600
+  },
+  "revmagic": {
+    "command": "revmagic-mcp",
+    "args": [],
+    "timeoutMs": 1800000,
+    "stderrMaxBytes": 65536,
+    "extractTool": "url_to_mp3",
+    "outputDirectory": ".runtime/audio",
+    "optimize": true
+  },
+  "notebooklm": {
+    "command": "notebooklm-mcp",
+    "args": [],
+    "timeoutMs": 1200000,
+    "stderrMaxBytes": 65536,
+    "createTool": "create_notebook",
+    "searchTool": "search_notebooks",
+    "getTool": "get_notebook",
+    "addTool": "add_audio_source",
+    "waitTool": "wait_for_source_ready",
+    "exportTool": "export_transcript",
+    "exportDirectory": ".runtime/notebooklm-transcripts"
+  }
+}

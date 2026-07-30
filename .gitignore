@@ -1,0 +1,16 @@
+node_modules/
+dist/
+release/
+.runtime/
+config.local.json
+.DS_Store
+*.pdf
+*.mp3
+*.m4a
+*.wav
+browser-profile/
+audio/
+transcripts/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
