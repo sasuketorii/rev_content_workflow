@@ -41,12 +41,18 @@ const engine = new Engine(config, store);
 try {
   if (command === "doctor") {
     await access(config.database).catch(() => undefined);
-    const signal = AbortSignal.timeout(15_000);
-    const rev = await new McpClient(config.revmagic).listTools(signal, 15_000).catch((error) => ({ error: String(error) }));
+    const rev = await new McpClient(config.revmagic)
+      .listTools(AbortSignal.timeout(15_000), 15_000)
+      .catch((error) => ({ error: String(error) }));
     const noteClient = new McpClient(config.notebooklm);
-    const note = await noteClient.listTools(signal, 15_000).catch((error) => ({ error: String(error) }));
-    const health = await noteClient.call("get_health", {}).catch((error) => ({ error: String(error) }));
-    const authPreflight = await noteClient.call("check_auth", { timeout_ms: 15000 }, signal, 15_000)
+    const note = await noteClient.listTools(AbortSignal.timeout(15_000), 15_000)
+      .catch((error) => ({ error: String(error) }));
+    const health = await noteClient.call(
+      "get_health", {}, AbortSignal.timeout(15_000), 15_000
+    ).catch((error) => ({ error: String(error) }));
+    const authPreflight = await noteClient.call(
+      "check_auth", { timeout_ms: 15000 }, AbortSignal.timeout(15_000), 15_000
+    )
       .catch((error) => ({ error: String(error) }));
     const revNames = toolNames(rev);
     const noteNames = toolNames(note);

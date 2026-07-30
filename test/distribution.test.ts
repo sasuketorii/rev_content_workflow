@@ -68,6 +68,44 @@ async function fixture() {
   return { root, bin, statePath, paths };
 }
 
+async function doctorMcpFixture(options: {
+  authenticated: boolean;
+  timeoutMs?: number;
+  listDelayMs?: number;
+  toolDelayMs?: Record<string, number>;
+}) {
+  const result = await fixture();
+  const mcpState = join(result.root, "doctor-mcp-state.json");
+  await writeFile(mcpState, JSON.stringify({
+    authenticated: options.authenticated,
+    calls: {},
+    listDelayMs: options.listDelayMs ?? 0,
+    toolDelayMs: options.toolDelayMs ?? {}
+  }));
+  const fake = join(process.cwd(), "test", "preflight-mcp.mjs");
+  const processConfig = (role: "rev" | "note") => ({
+    command: process.execPath,
+    args: [fake],
+    env: { FAKE_PREFLIGHT_STATE: mcpState, FAKE_PREFLIGHT_ROLE: role },
+    timeoutMs: options.timeoutMs ?? 15_000
+  });
+  const config = await writeDefaultConfig(result.paths);
+  config.revmagic = {
+    ...config.revmagic,
+    ...processConfig("rev")
+  };
+  config.notebooklm = {
+    ...config.notebooklm,
+    ...processConfig("note")
+  };
+  await writeFile(result.paths.configFile, `${JSON.stringify(config)}\n`);
+  await Promise.all([
+    writeFile(result.paths.notebookEntry, "fixture"),
+    writeFile(result.paths.revmagicMcp, "fixture")
+  ]);
+  return { ...result, mcpState };
+}
+
 test("default config keeps credentials and artifacts in user-local runtime directories", async () => {
   const { paths } = await fixture();
   const config = await writeDefaultConfig(paths);
@@ -91,6 +129,56 @@ test("doctor rejects a current pointer that drifts from the receipt release", as
   assert.equal(result.install_provenance, false);
   assert.match(String(result.install_error), /current install pointer/);
   assert.equal(await readFile(paths.binPath, "utf8"), "owned launcher");
+});
+
+test("offline doctor uses get_health and never invokes live authentication", async () => {
+  const { paths, mcpState } = await doctorMcpFixture({ authenticated: false });
+  const result = await doctor(paths, { offline: true });
+  const state = JSON.parse(await readFile(mcpState, "utf8")) as {
+    calls: Record<string, number>;
+  };
+  assert.equal(result.required_tools, true);
+  assert.equal(result.authenticated, false);
+  assert.equal(result.auth_mode, "offline_get_health");
+  assert.equal(result.mcp_error, undefined);
+  assert.equal(result.notebooklm_auth, undefined);
+  assert.equal(typeof result.notebooklm_health, "object");
+  assert.equal(state.calls.get_health, 1);
+  assert.equal(state.calls.check_auth ?? 0, 0);
+  assert.equal(state.calls.setup_auth ?? 0, 0);
+});
+
+test("default doctor retains one bounded live check_auth call", async () => {
+  const { paths, mcpState } = await doctorMcpFixture({ authenticated: false });
+  const result = await doctor(paths);
+  const state = JSON.parse(await readFile(mcpState, "utf8")) as {
+    calls: Record<string, number>;
+  };
+  assert.equal(result.required_tools, true);
+  assert.equal(result.authenticated, false);
+  assert.equal(result.auth_mode, "live_check_auth");
+  assert.equal(result.mcp_error, undefined);
+  assert.equal(state.calls.get_health, 1);
+  assert.equal(state.calls.check_auth, 1);
+});
+
+test("doctor gives each serial MCP operation a fresh bounded deadline", async () => {
+  const delayMs = 250;
+  const { paths, mcpState } = await doctorMcpFixture({
+    authenticated: true,
+    timeoutMs: 600,
+    listDelayMs: delayMs,
+    toolDelayMs: { get_health: delayMs, check_auth: delayMs }
+  });
+  const result = await doctor(paths);
+  const state = JSON.parse(await readFile(mcpState, "utf8")) as {
+    calls: Record<string, number>;
+  };
+  assert.equal(result.mcp_error, undefined);
+  assert.equal(result.required_tools, true);
+  assert.equal(result.authenticated, true);
+  assert.equal(state.calls.get_health, 1);
+  assert.equal(state.calls.check_auth, 1);
 });
 
 test("Claude 2.1.220 text registration accepts only User config scope", () => {

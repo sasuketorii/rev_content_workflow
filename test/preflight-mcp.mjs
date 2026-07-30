@@ -10,6 +10,10 @@ const load = () => JSON.parse(readFileSync(statePath, "utf8"));
 const save = (value) => writeFileSync(statePath, JSON.stringify(value));
 const response = (id, result) => process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, result })}\n`);
 const schema = (name, properties = {}) => ({ name, inputSchema: { type: "object", properties } });
+const delayed = (milliseconds, callback) => {
+  if (milliseconds > 0) globalThis.setTimeout(callback, milliseconds);
+  else callback();
+};
 
 createInterface({ input: process.stdin }).on("line", (line) => {
   const request = JSON.parse(line);
@@ -19,6 +23,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       serverInfo: { name: `fake-${role}`, version: "1" }
     });
   } else if (request.method === "tools/list") {
+    const state = load();
     const tools = role === "rev"
       ? [schema("url_to_mp3", { url: { type: "string" } })]
       : [
@@ -28,15 +33,20 @@ createInterface({ input: process.stdin }).on("line", (line) => {
           schema("export_transcript", { source_name: { type: "string" } }),
           schema("check_auth"), schema("setup_auth"), schema("get_health")
         ];
-    response(request.id, { tools });
+    delayed(state.listDelayMs ?? 0, () => response(request.id, { tools }));
   } else if (request.method === "tools/call") {
     const state = load();
-    state.calls[request.params.name] = (state.calls[request.params.name] ?? 0) + 1;
+    const name = request.params.name;
+    state.calls[name] = (state.calls[name] ?? 0) + 1;
     save(state);
-    response(request.id, {
-      content: [{ type: "text", text: JSON.stringify(
-        request.params.name === "check_auth" ? { authenticated: state.authenticated } : { ok: true }
-      ) }]
-    });
+    const result = name === "check_auth" || name === "get_health"
+      ? {
+          authenticated: state.authenticated,
+          auth_status: state.authenticated ? "runtime_verified" : "snapshot_missing"
+        }
+      : { ok: true };
+    delayed(state.toolDelayMs?.[name] ?? 0, () => response(request.id, {
+      content: [{ type: "text", text: JSON.stringify(result) }]
+    }));
   }
 });

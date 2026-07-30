@@ -4,6 +4,20 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 TEST_ROOT=$(mktemp -d)
 ORIGINAL_HOME=$HOME
+print_doctor_diagnostics() {
+  node - "$TEST_ROOT" "$ORIGINAL_HOME" \
+    "$TEST_ROOT/doctor.stdout" "$TEST_ROOT/doctor.stderr" <<'NODE'
+const { readFileSync } = require("node:fs");
+const [testRoot, originalHome, ...files] = process.argv.slice(2);
+for (const path of files) {
+  let content = "";
+  try { content = readFileSync(path, "utf8"); } catch {}
+  content = content.split(testRoot).join("<TEST_ROOT>")
+    .split(originalHome).join("<ORIGINAL_HOME>");
+  process.stderr.write(`--- ${path.split("/").at(-1)} ---\n${content}`);
+}
+NODE
+}
 export CARGO_HOME=${CARGO_HOME:-"$ORIGINAL_HOME/.cargo"}
 export RUSTUP_HOME=${RUSTUP_HOME:-"$ORIGINAL_HOME/.rustup"}
 export HOME=$TEST_ROOT/home
@@ -32,11 +46,24 @@ grep -q "unrelated user launcher" "$XDG_BIN_HOME/rev-content"
 rm "$XDG_BIN_HOME/rev-content"
 "$ROOT/install.sh"
 "$XDG_BIN_HOME/rev-content" setup --client codex
-if "$XDG_BIN_HOME/rev-content" doctor --json >"$TEST_ROOT/doctor.json"; then
-  echo "doctor unexpectedly reported authenticated in a clean fixture" >&2
+if "$XDG_BIN_HOME/rev-content" doctor --json --offline \
+  >"$TEST_ROOT/doctor.stdout" 2>"$TEST_ROOT/doctor.stderr"; then
+  echo "offline doctor unexpectedly reported authenticated in a clean fixture" >&2
+  print_doctor_diagnostics
   exit 1
 fi
-node -e 'const d=require(process.argv[1]);if(d.config!==true||d.required_tools!==true||d.authenticated!==false)process.exit(1)' "$TEST_ROOT/doctor.json"
+if ! node -e '
+const d=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"));
+if(d.config!==true||d.required_tools!==true||d.authenticated!==false||
+   d.auth_mode!=="offline_get_health"||d.mcp_error!==undefined||
+   d.notebooklm_auth!==undefined||typeof d.notebooklm_health!=="object"||
+   d.install_provenance!==true||!d.managed_registrations.every(x=>x.ok)||
+   !d.runtime_writable.every(x=>x.ok))process.exit(1)
+' "$TEST_ROOT/doctor.stdout"; then
+  echo "offline doctor result did not satisfy the fixture contract" >&2
+  print_doctor_diagnostics
+  exit 1
+fi
 if "$XDG_BIN_HOME/rev-content" run https://example.test/unauthenticated >"$TEST_ROOT/run.json" 2>"$TEST_ROOT/run.stderr"; then
   echo "unauthenticated run unexpectedly succeeded" >&2
   exit 1

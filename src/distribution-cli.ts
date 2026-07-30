@@ -7,7 +7,7 @@ function usage(): never {
   console.error(`usage: rev-content COMMAND
   setup [--client auto|codex|claude|both] [--dry-run]
   auth
-  doctor [--json]
+  doctor [--json] [--offline]
   run URL
   status [JOB]
   resume JOB
@@ -32,7 +32,8 @@ try {
   } else if (command === "auth") {
     result = await authenticate();
   } else if (command === "doctor") {
-    result = await doctor();
+    if (args.some((arg) => !["--json", "--offline"].includes(arg))) usage();
+    result = await doctor(undefined, { offline: args.includes("--offline") });
     if (!(result as { ok: boolean }).ok) process.exitCode = 1;
   } else if (command === "run") {
     if (!args[0]) usage();

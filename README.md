@@ -36,11 +36,17 @@ Ensure the printed user-local bin directory is on `PATH`, then:
 rev-content setup --client auto
 rev-content auth
 rev-content doctor --json
+rev-content doctor --json --offline
 rev-content run 'https://example.com/media'
 ```
 
 `auth` opens a visible browser. Complete Google authentication yourself; do
 not put credentials in config or chat.
+
+`doctor --offline` checks tools, registrations, installed provenance, writable
+runtime directories, and `get_health` without calling the live `check_auth`
+tool. Its authentication result is the conservative status reported by
+`get_health`; plain `doctor` continues to perform the bounded live check.
 
 `setup` accepts `auto`, `codex`, `claude`, or `both`. Registration uses the
 official client CLIs. Every existing registration is compared by its actual

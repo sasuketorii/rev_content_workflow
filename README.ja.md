@@ -20,11 +20,16 @@ Rev Contentは、メディアURLを再開可能なNotebookLM文字起こしジ�
 rev-content setup --client auto
 rev-content auth
 rev-content doctor --json
+rev-content doctor --json --offline
 rev-content run 'https://example.com/media'
 ```
 
 `auth`だけが対話操作を要求し、見えるブラウザで本人がGoogle認証します。
 資格情報を設定ファイルやチャットへ入力しないでください。
+
+`doctor --offline`はtool、登録、導入元、書込可能性、`get_health`を検査しますが、
+live `check_auth`は呼びません。認証結果は`get_health`の保守的な値を使います。
+通常の`doctor`は、独立した制限時間を持つlive認証確認を引き続き実行します。
 
 `setup`のclientは`auto`、`codex`、`claude`、`both`です。公式CLIでMCPを
 登録します。変更前に全clientの実command・args・envを比較し、不一致の同名登録は

@@ -142,8 +142,13 @@ export async function authenticate(paths = runtimePaths()): Promise<unknown> {
   return new McpClient(config.notebooklm).call("setup_auth", { show_browser: true });
 }
 
-export async function doctor(paths = runtimePaths()): Promise<Record<string, unknown>> {
+export async function doctor(
+  paths = runtimePaths(),
+  options: { offline?: boolean } = {}
+): Promise<Record<string, unknown>> {
+  const offline = options.offline === true;
   const checks: Record<string, unknown> = {
+    auth_mode: offline ? "offline_get_health" : "live_check_auth",
     node: { ok: nodeCompatible(), version: process.versions.node },
     ffmpeg: await commandExists("ffmpeg"),
     yt_dlp: await commandExists("yt-dlp"),
@@ -178,14 +183,15 @@ export async function doctor(paths = runtimePaths()): Promise<Record<string, unk
   if (checks.config) {
     try {
       const config = await loadConfig(paths.configFile);
-      const signal = AbortSignal.timeout(15_000);
       const revTimeout = Math.min(config.revmagic.timeoutMs ?? 15_000, 15_000);
       const noteTimeout = Math.min(config.notebooklm.timeoutMs ?? 15_000, 15_000);
-      const rev = await new McpClient(config.revmagic).listTools(signal, revTimeout);
+      const rev = await new McpClient(config.revmagic)
+        .listTools(AbortSignal.timeout(revTimeout), revTimeout);
       const notebook = new McpClient(config.notebooklm);
-      const noteTools = await notebook.listTools(signal, noteTimeout);
-      const health = await notebook.call("get_health", {}, signal, noteTimeout);
-      const auth = await notebook.call("check_auth", { timeout_ms: noteTimeout }, signal, noteTimeout);
+      const noteTools = await notebook.listTools(AbortSignal.timeout(noteTimeout), noteTimeout);
+      const health = await notebook.call(
+        "get_health", {}, AbortSignal.timeout(noteTimeout), noteTimeout
+      );
       const revNames = toolNames(rev);
       const noteNames = toolNames(noteTools);
       const requiredNotebook = [
@@ -197,8 +203,16 @@ export async function doctor(paths = runtimePaths()): Promise<Record<string, unk
       checks.required_tools = revNames.has(config.revmagic.extractTool) &&
         requiredNotebook.every((name) => noteNames.has(name));
       checks.notebooklm_health = health;
-      checks.notebooklm_auth = auth;
-      checks.authenticated = findBoolean(auth, "authenticated") ?? false;
+      if (offline) {
+        checks.authenticated = findBoolean(health, "authenticated") ?? false;
+      } else {
+        const auth = await notebook.call(
+          "check_auth", { timeout_ms: noteTimeout },
+          AbortSignal.timeout(noteTimeout), noteTimeout
+        );
+        checks.notebooklm_auth = auth;
+        checks.authenticated = findBoolean(auth, "authenticated") ?? false;
+      }
     } catch (error) {
       checks.mcp_error = error instanceof Error ? error.message : String(error);
     }
